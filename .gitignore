@@ -1,0 +1,6 @@
+.DS_Store
+__MACOSX/
+labs/**/obj_dir/
+labs/**/project/
+labs/**/*.vcd
+labs/**/*.fst
