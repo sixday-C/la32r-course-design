@@ -85,6 +85,19 @@ wire inst_bl;
 wire inst_beq;
 wire inst_bne;
 wire inst_lu12i_w;
+wire inst_slti;
+wire inst_sltui;
+wire inst_andi;
+wire inst_ori;
+wire inst_xori;
+wire inst_sll_w;
+wire inst_srl_w;
+wire inst_sra_w;
+wire inst_pcaddu12i;
+wire inst_blt;
+wire inst_bge;
+wire inst_bltu;
+wire inst_bgeu;
 
 assign inst_add_w = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                   & op_21_20_d[2'h1] & op_19_15_d[5'h00];
@@ -118,53 +131,89 @@ assign inst_beq     = op_31_26_d[6'h16];
 assign inst_bne     = op_31_26_d[6'h17];
 assign inst_lu12i_w = op_31_26_d[6'h05] & ~ds_inst[25];
 
+// 下面是这次新增指令的编码。立即数类主要看 op_25_22，
+// sll.w/srl.w/sra.w 则和 add.w 一样，还要继续检查低位功能码。
+assign inst_slti     = op_31_26_d[6'h00] & op_25_22_d[4'h8];
+assign inst_sltui    = op_31_26_d[6'h00] & op_25_22_d[4'h9];
+assign inst_andi     = op_31_26_d[6'h00] & op_25_22_d[4'hd];
+assign inst_ori      = op_31_26_d[6'h00] & op_25_22_d[4'he];
+assign inst_xori     = op_31_26_d[6'h00] & op_25_22_d[4'hf];
+assign inst_sll_w    = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h1] & op_19_15_d[5'h0e];
+assign inst_srl_w    = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h1] & op_19_15_d[5'h0f];
+assign inst_sra_w    = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h1] & op_19_15_d[5'h10];
+assign inst_pcaddu12i = op_31_26_d[6'h07] & ~ds_inst[25];
+assign inst_blt      = op_31_26_d[6'h18];
+assign inst_bge      = op_31_26_d[6'h19];
+assign inst_bltu     = op_31_26_d[6'h1a];
+assign inst_bgeu     = op_31_26_d[6'h1b];
+
 // -----------------------------------------------------------------------------
 // 控制信号、立即数和源寄存器
 // -----------------------------------------------------------------------------
 wire [11:0] alu_op;
 assign alu_op[0] = inst_add_w | inst_addi_w | inst_ld_w |
-                   inst_st_w | inst_jirl | inst_bl;
+                   inst_st_w | inst_jirl | inst_bl | inst_pcaddu12i;
 assign alu_op[1] = inst_sub_w;
-assign alu_op[2] = inst_slt;
-assign alu_op[3] = inst_sltu;
-assign alu_op[4] = inst_and;
+assign alu_op[2] = inst_slt | inst_slti;
+assign alu_op[3] = inst_sltu | inst_sltui;
+assign alu_op[4] = inst_and | inst_andi;
 assign alu_op[5] = inst_nor;
-assign alu_op[6] = inst_or;
-assign alu_op[7] = inst_xor;
-assign alu_op[8] = inst_slli_w;
-assign alu_op[9] = inst_srli_w;
-assign alu_op[10] = inst_srai_w;
+assign alu_op[6] = inst_or | inst_ori;
+assign alu_op[7] = inst_xor | inst_xori;
+assign alu_op[8] = inst_slli_w | inst_sll_w;
+assign alu_op[9] = inst_srli_w | inst_srl_w;
+assign alu_op[10] = inst_srai_w | inst_sra_w;
 assign alu_op[11] = inst_lu12i_w;
-wire need_si20 = inst_lu12i_w;
+
+// slti/sltui、andi/ori/xori 只换立即数或比较方式，ALU 运算本身可以复用。
+// pcaddu12i 要算 PC + 高位立即数，所以走加法，并把 ds_pc 当第一个操作数。
+wire need_si20 = inst_lu12i_w | inst_pcaddu12i;
 wire need_si26 = inst_b | inst_bl;
 wire src2_is_4 = inst_jirl | inst_bl;
+wire need_ui12 = inst_andi | inst_ori | inst_xori;
+// andi $r4,$r5,0xff 里的 0xff 要补成 0x000000ff；
+// slti 的立即数则要保留符号位，例如 0xfff 按 -1 处理。
 wire [31:0] imm = src2_is_4 ? 32'd4 :
                   need_si20 ? {i20, 12'b0} :
+                  need_ui12 ? {20'b0, i12} :
                               {{20{i12[11]}}, i12};
 wire [31:0] br_offs = need_si26 ? {{4{i26[25]}}, i26, 2'b0} :
                                   {{14{i16[15]}}, i16, 2'b0};
 wire [31:0] jirl_offs = {{14{i16[15]}}, i16, 2'b0};
-wire src_reg_is_rd = inst_beq | inst_bne | inst_st_w;
+wire src_reg_is_rd = inst_beq | inst_bne | inst_blt | inst_bge |
+                     inst_bltu | inst_bgeu | inst_st_w;
 
 // 当前指令是否真正需要读取第一个源寄存器 rj。
+// 例如 sll.w r6,r4,r5 会拿 r4 的值左移，r4 依赖前一条指令时也要前递或阻塞。
 wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_nor    | inst_and    | inst_or     | inst_xor  |
                inst_slli_w | inst_srli_w | inst_srai_w | inst_addi_w |
                inst_ld_w   | inst_st_w   | inst_jirl   | inst_beq |
-               inst_bne;
+               inst_bne    | inst_slti   | inst_sltui  | inst_andi |
+               inst_ori    | inst_xori   | inst_sll_w  | inst_srl_w |
+               inst_sra_w  | inst_blt    | inst_bge    | inst_bltu |
+               inst_bgeu;
 
 // 当前指令是否真正需要读取第二个源寄存器。
 wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
                 inst_nor   | inst_and   | inst_or   | inst_xor  |
-                inst_st_w  | inst_beq   | inst_bne;
+                inst_st_w  | inst_beq   | inst_bne   | inst_sll_w |
+                inst_srl_w | inst_sra_w | inst_blt   | inst_bge |
+                inst_bltu  | inst_bgeu;
 
-wire src1_is_pc = inst_jirl | inst_bl;
+wire src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;
 wire src2_is_imm = inst_slli_w | inst_srli_w | inst_srai_w |
-                   inst_addi_w | inst_ld_w   | inst_st_w   |
-                   inst_lu12i_w | inst_jirl  | inst_bl;
+                   inst_addi_w | inst_ld_w   | inst_st_w    |
+                   inst_lu12i_w | inst_jirl | inst_bl      |
+                   inst_slti   | inst_sltui | inst_andi    |
+                   inst_ori    | inst_xori  | inst_pcaddu12i;
 wire res_from_mem = inst_ld_w;
 // bl 要写链接地址到寄存器 1，不能和其他分支一起关闭写回，故删去 bl。
-wire gr_we = ~(inst_st_w | inst_beq | inst_bne | inst_b);//这些指令不写回寄存器
+wire gr_we = ~(inst_st_w | inst_beq | inst_bne | inst_blt |
+               inst_bge | inst_bltu | inst_bgeu | inst_b);
 wire mem_we = inst_st_w;
 wire [4:0] dest = inst_bl ? 5'd1 : rd;
 
@@ -257,14 +306,20 @@ wire rkd_raw_conflict =
 assign ds_ready_go = !(ds_valid && (rj_raw_conflict || rkd_raw_conflict));
 
 // 分支在 ID 阶段判断；操作数使用前递后的值，相关未解决时暂不跳转。
+// blt/bge 把寄存器值当有符号数；bltu/bgeu 把相同的位型当无符号数比较。
 assign br_taken =
     ((inst_beq && rj_value == rkd_value) ||
      (inst_bne && rj_value != rkd_value) ||
+     (inst_blt && $signed(rj_value) < $signed(rkd_value)) || // 有符号比较
+     (inst_bge && $signed(rj_value) >= $signed(rkd_value)) || // 有符号比较
+     (inst_bltu && rj_value < rkd_value) || // 无符号比较
+     (inst_bgeu && rj_value >= rkd_value) ||  //无符号比较
      inst_jirl || inst_bl || inst_b) && ds_valid && ds_ready_go;
 
 // 相对分支以 ds_pc 为基址；jirl 以 rj_value 为基址。
 wire [31:0] br_target =
-    (inst_beq || inst_bne || inst_bl || inst_b) ?
+    (inst_beq || inst_bne || inst_blt || inst_bge ||
+     inst_bltu || inst_bgeu || inst_bl || inst_b) ?
     ds_pc + br_offs : rj_value + jirl_offs;
 
 assign br_bus = {br_taken, br_target};
