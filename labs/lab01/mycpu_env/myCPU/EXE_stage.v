@@ -40,13 +40,16 @@ wire [31:0] es_imm;
 wire es_res_from_mem;
 wire es_gr_we;
 wire es_mem_we;
+wire [1:0] es_mem_size;
+wire es_mem_unsigned;
 wire [4:0] es_dest;
 wire [31:0] es_pc;
 
 assign {
     es_alu_op, es_src1_is_pc, es_src2_is_imm,
     es_rj_value, es_rkd_value, es_imm,
-    es_res_from_mem, es_gr_we, es_mem_we, es_dest, es_pc
+    es_res_from_mem, es_gr_we, es_mem_we,
+    es_mem_size, es_mem_unsigned, es_dest, es_pc
 } = es_bus_r;
 
 wire [31:0] alu_result;
@@ -60,7 +63,8 @@ alu u_alu (
 
 assign es_to_ms_bus = {
     es_pc, alu_result, es_rkd_value,
-    es_res_from_mem, es_gr_we, es_mem_we, es_dest
+    es_res_from_mem, es_gr_we, es_mem_we,
+    es_mem_size, es_mem_unsigned, es_dest
 };
 assign es_fwd_bus = {
     es_valid, es_gr_we, es_res_from_mem, es_dest, alu_result

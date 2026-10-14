@@ -41,21 +41,32 @@ wire [31:0] ms_rkd_value;
 wire ms_res_from_mem;
 wire ms_gr_we;
 wire ms_mem_we;
+wire [1:0] ms_mem_size;
+wire ms_mem_unsigned;
 wire [4:0] ms_dest;
 
 assign {
     ms_pc, ms_alu_result, ms_rkd_value,
-    ms_res_from_mem, ms_gr_we, ms_mem_we, ms_dest
+    ms_res_from_mem, ms_gr_we, ms_mem_we,
+    ms_mem_size, ms_mem_unsigned, ms_dest
 } = ms_bus_r;
 
-// MEM stage：只有 ld.w / st.w 访问数据 RAM；st.w 的 4 个字节写使能全为 1。
-// 为 1 时才能访问数据 sram。
+// 同一个 RAM 端口处理 word、byte 和 half。地址低两位决定落在哪个字节。
 assign data_sram_en = ms_valid && (ms_mem_we || ms_res_from_mem);
-assign data_sram_we = {4{ms_valid && ms_mem_we}};
+wire [3:0] store_we = ms_mem_size == 2'd1 ?
+                      (4'b0001 << ms_alu_result[1:0]) :
+                      ms_mem_size == 2'd2 ?
+                      (4'b0011 << ms_alu_result[1:0]) : 4'b1111;
+assign data_sram_we = {4{ms_valid && ms_mem_we}} & store_we;
 assign data_sram_addr = ms_alu_result;
-assign data_sram_wdata = ms_rkd_value;
+// 写 byte/half 时复制到每条字节通道，由 data_sram_we 选中目标通道。
+assign data_sram_wdata = ms_mem_size == 2'd1 ?
+                          {4{ms_rkd_value[7:0]}} :
+                          ms_mem_size == 2'd2 ?
+                          {2{ms_rkd_value[15:0]}} : ms_rkd_value;
 assign ms_to_ws_bus = {
-    ms_pc, ms_alu_result, ms_res_from_mem, ms_gr_we, ms_dest
+    ms_pc, ms_alu_result, ms_res_from_mem, ms_gr_we,
+    ms_mem_size, ms_mem_unsigned, ms_dest
 };
 assign ms_fwd_bus = {
     ms_valid, ms_gr_we, ms_res_from_mem, ms_dest, ms_alu_result

@@ -37,14 +37,25 @@ wire [31:0] ws_pc;
 wire [31:0] ws_alu_result;
 wire ws_res_from_mem;
 wire ws_gr_we;
+wire [1:0] ws_mem_size;
+wire ws_mem_unsigned;
 wire [4:0] ws_dest;
 
 assign {
-    ws_pc, ws_alu_result, ws_res_from_mem, ws_gr_we, ws_dest
+    ws_pc, ws_alu_result, ws_res_from_mem, ws_gr_we,
+    ws_mem_size, ws_mem_unsigned, ws_dest
 } = ws_bus_r;
 
+// RAM 返回整字；按原地址挑出 byte/half，再决定符号扩展还是零扩展。
+wire [31:0] shifted_rdata = data_sram_rdata >> {ws_alu_result[1:0], 3'b000};
+wire [31:0] load_result =
+    ws_mem_size == 2'd1 ?
+        {{24{shifted_rdata[7] && !ws_mem_unsigned}}, shifted_rdata[7:0]} :
+    ws_mem_size == 2'd2 ?
+        {{16{shifted_rdata[15] && !ws_mem_unsigned}}, shifted_rdata[15:0]} :
+        data_sram_rdata;
 wire [31:0] final_result =
-    ws_res_from_mem ? data_sram_rdata : ws_alu_result;
+    ws_res_from_mem ? load_result : ws_alu_result;
 wire rf_we = ws_valid && ws_gr_we;
 
 // 写回寄存器堆，并给 ID 阶段提供最终结果的前递。

@@ -79,6 +79,12 @@ wire inst_srai_w;
 wire inst_addi_w;
 wire inst_ld_w;
 wire inst_st_w;
+wire inst_ld_b;
+wire inst_ld_h;
+wire inst_ld_bu;
+wire inst_ld_hu;
+wire inst_st_b;
+wire inst_st_h;
 wire inst_jirl;
 wire inst_b;
 wire inst_bl;
@@ -124,6 +130,12 @@ assign inst_srai_w = op_31_26_d[6'h00] & op_25_22_d[4'h1]
 assign inst_addi_w  = op_31_26_d[6'h00] & op_25_22_d[4'ha];
 assign inst_ld_w    = op_31_26_d[6'h0a] & op_25_22_d[4'h2];
 assign inst_st_w    = op_31_26_d[6'h0a] & op_25_22_d[4'h6];
+assign inst_ld_b    = op_31_26_d[6'h0a] & op_25_22_d[4'h0];
+assign inst_ld_h    = op_31_26_d[6'h0a] & op_25_22_d[4'h1];
+assign inst_ld_bu   = op_31_26_d[6'h0a] & op_25_22_d[4'h8];
+assign inst_ld_hu   = op_31_26_d[6'h0a] & op_25_22_d[4'h9];
+assign inst_st_b    = op_31_26_d[6'h0a] & op_25_22_d[4'h4];
+assign inst_st_h    = op_31_26_d[6'h0a] & op_25_22_d[4'h5];
 assign inst_jirl    = op_31_26_d[6'h13];
 assign inst_b       = op_31_26_d[6'h14];
 assign inst_bl      = op_31_26_d[6'h15];
@@ -155,7 +167,9 @@ assign inst_bgeu     = op_31_26_d[6'h1b];
 // -----------------------------------------------------------------------------
 wire [11:0] alu_op;
 assign alu_op[0] = inst_add_w | inst_addi_w | inst_ld_w |
-                   inst_st_w | inst_jirl | inst_bl | inst_pcaddu12i;
+                   inst_st_w | inst_ld_b | inst_ld_h | inst_ld_bu |
+                   inst_ld_hu | inst_st_b | inst_st_h |
+                   inst_jirl | inst_bl | inst_pcaddu12i;
 assign alu_op[1] = inst_sub_w;
 assign alu_op[2] = inst_slt | inst_slti;
 assign alu_op[3] = inst_sltu | inst_sltui;
@@ -184,14 +198,16 @@ wire [31:0] br_offs = need_si26 ? {{4{i26[25]}}, i26, 2'b0} :
                                   {{14{i16[15]}}, i16, 2'b0};
 wire [31:0] jirl_offs = {{14{i16[15]}}, i16, 2'b0};
 wire src_reg_is_rd = inst_beq | inst_bne | inst_blt | inst_bge |
-                     inst_bltu | inst_bgeu | inst_st_w;
+                     inst_bltu | inst_bgeu | inst_st_w | inst_st_b | inst_st_h;
 
 // 当前指令是否真正需要读取第一个源寄存器 rj。
 // 例如 sll.w r6,r4,r5 会拿 r4 的值左移，r4 依赖前一条指令时也要前递或阻塞。
 wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_nor    | inst_and    | inst_or     | inst_xor  |
                inst_slli_w | inst_srli_w | inst_srai_w | inst_addi_w |
-               inst_ld_w   | inst_st_w   | inst_jirl   | inst_beq |
+               inst_ld_w   | inst_st_w   | inst_ld_b   | inst_ld_h |
+               inst_ld_bu  | inst_ld_hu  | inst_st_b   | inst_st_h |
+               inst_jirl   | inst_beq |
                inst_bne    | inst_slti   | inst_sltui  | inst_andi |
                inst_ori    | inst_xori   | inst_sll_w  | inst_srl_w |
                inst_sra_w  | inst_blt    | inst_bge    | inst_bltu |
@@ -200,21 +216,30 @@ wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
 // 当前指令是否真正需要读取第二个源寄存器。
 wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
                 inst_nor   | inst_and   | inst_or   | inst_xor  |
-                inst_st_w  | inst_beq   | inst_bne   | inst_sll_w |
+                inst_st_w  | inst_st_b  | inst_st_h  | inst_beq |
+                inst_bne   | inst_sll_w |
                 inst_srl_w | inst_sra_w | inst_blt   | inst_bge |
                 inst_bltu  | inst_bgeu;
 
 wire src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;
 wire src2_is_imm = inst_slli_w | inst_srli_w | inst_srai_w |
                    inst_addi_w | inst_ld_w   | inst_st_w    |
+                   inst_ld_b   | inst_ld_h   | inst_ld_bu   |
+                   inst_ld_hu  | inst_st_b   | inst_st_h    |
                    inst_lu12i_w | inst_jirl | inst_bl      |
                    inst_slti   | inst_sltui | inst_andi    |
                    inst_ori    | inst_xori  | inst_pcaddu12i;
-wire res_from_mem = inst_ld_w;
+wire res_from_mem = inst_ld_w | inst_ld_b | inst_ld_h |
+                    inst_ld_bu | inst_ld_hu;
 // bl 要写链接地址到寄存器 1，不能和其他分支一起关闭写回，故删去 bl。
-wire gr_we = ~(inst_st_w | inst_beq | inst_bne | inst_blt |
+wire gr_we = ~(inst_st_w | inst_st_b | inst_st_h |
+               inst_beq | inst_bne | inst_blt |
                inst_bge | inst_bltu | inst_bgeu | inst_b);
-wire mem_we = inst_st_w;
+wire mem_we = inst_st_w | inst_st_b | inst_st_h;
+// 00: word，01: byte，10: half；无符号位只对 load 有意义。
+wire [1:0] mem_size = (inst_ld_b | inst_ld_bu | inst_st_b) ? 2'd1 :
+                      (inst_ld_h | inst_ld_hu | inst_st_h) ? 2'd2 : 2'd0;
+wire mem_unsigned = inst_ld_bu | inst_ld_hu;
 wire [4:0] dest = inst_bl ? 5'd1 : rd;
 
 // -----------------------------------------------------------------------------
@@ -326,7 +351,7 @@ assign br_bus = {br_taken, br_target};
 assign ds_to_es_bus = {
     alu_op, src1_is_pc, src2_is_imm,
     rj_value, rkd_value, imm,
-    res_from_mem, gr_we, mem_we, dest, ds_pc
+    res_from_mem, gr_we, mem_we, mem_size, mem_unsigned, dest, ds_pc
 };
 
 endmodule
