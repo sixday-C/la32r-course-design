@@ -40,6 +40,7 @@ wire [31:0] es_imm;
 wire es_res_from_mem;
 wire es_gr_we;
 wire es_mem_we;
+// 地址在 EXE 算好；访问宽度和扩展方式原样带到后面两级。
 wire [1:0] es_mem_size;
 wire es_mem_unsigned;
 wire [4:0] es_dest;

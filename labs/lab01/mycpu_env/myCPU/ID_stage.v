@@ -79,6 +79,7 @@ wire inst_srai_w;
 wire inst_addi_w;
 wire inst_ld_w;
 wire inst_st_w;
+// 本次增加的访存指令：b 取 1 字节，h 取 2 字节，bu/hu 读出后补零。
 wire inst_ld_b;
 wire inst_ld_h;
 wire inst_ld_bu;
@@ -130,6 +131,7 @@ assign inst_srai_w = op_31_26_d[6'h00] & op_25_22_d[4'h1]
 assign inst_addi_w  = op_31_26_d[6'h00] & op_25_22_d[4'ha];
 assign inst_ld_w    = op_31_26_d[6'h0a] & op_25_22_d[4'h2];
 assign inst_st_w    = op_31_26_d[6'h0a] & op_25_22_d[4'h6];
+// 它们和 ld.w/st.w 一样，靠 op_25_22 区分具体的读写宽度。
 assign inst_ld_b    = op_31_26_d[6'h0a] & op_25_22_d[4'h0];
 assign inst_ld_h    = op_31_26_d[6'h0a] & op_25_22_d[4'h1];
 assign inst_ld_bu   = op_31_26_d[6'h0a] & op_25_22_d[4'h8];
@@ -166,6 +168,7 @@ assign inst_bgeu     = op_31_26_d[6'h1b];
 // 控制信号、立即数和源寄存器
 // -----------------------------------------------------------------------------
 wire [11:0] alu_op;
+// 所有访存指令都要先算 rj + 偏移量，得到要访问的地址。
 assign alu_op[0] = inst_add_w | inst_addi_w | inst_ld_w |
                    inst_st_w | inst_ld_b | inst_ld_h | inst_ld_bu |
                    inst_ld_hu | inst_st_b | inst_st_h |
@@ -197,11 +200,13 @@ wire [31:0] imm = src2_is_4 ? 32'd4 :
 wire [31:0] br_offs = need_si26 ? {{4{i26[25]}}, i26, 2'b0} :
                                   {{14{i16[15]}}, i16, 2'b0};
 wire [31:0] jirl_offs = {{14{i16[15]}}, i16, 2'b0};
+// store 的 rd 是要写入内存的数据，不是这条指令的目的寄存器。
 wire src_reg_is_rd = inst_beq | inst_bne | inst_blt | inst_bge |
                      inst_bltu | inst_bgeu | inst_st_w | inst_st_b | inst_st_h;
 
 // 当前指令是否真正需要读取第一个源寄存器 rj。
 // 例如 sll.w r6,r4,r5 会拿 r4 的值左移，r4 依赖前一条指令时也要前递或阻塞。
+// ld.b/st.h 也要读 rj 算地址，不能漏掉相关判断。
 wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_nor    | inst_and    | inst_or     | inst_xor  |
                inst_slli_w | inst_srli_w | inst_srai_w | inst_addi_w |
@@ -213,7 +218,7 @@ wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_sra_w  | inst_blt    | inst_bge    | inst_bltu |
                inst_bgeu;
 
-// 当前指令是否真正需要读取第二个源寄存器。
+// 当前指令是否真正需要读取第二个源寄存器。store 要读 rd 中待写入的数据。
 wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
                 inst_nor   | inst_and   | inst_or   | inst_xor  |
                 inst_st_w  | inst_st_b  | inst_st_h  | inst_beq |
@@ -222,6 +227,7 @@ wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
                 inst_bltu  | inst_bgeu;
 
 wire src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;
+// 访存地址用 rj + 符号扩展后的 i12；i12 可以是负偏移。
 wire src2_is_imm = inst_slli_w | inst_srli_w | inst_srai_w |
                    inst_addi_w | inst_ld_w   | inst_st_w    |
                    inst_ld_b   | inst_ld_h   | inst_ld_bu   |
@@ -236,7 +242,8 @@ wire gr_we = ~(inst_st_w | inst_st_b | inst_st_h |
                inst_beq | inst_bne | inst_blt |
                inst_bge | inst_bltu | inst_bgeu | inst_b);
 wire mem_we = inst_st_w | inst_st_b | inst_st_h;
-// 00: word，01: byte，10: half；无符号位只对 load 有意义。
+// 00: word，01: byte，10: half；后两级据此选字节使能或读回的数据。
+// ld.bu/ld.hu 另带一个标志，提醒 WB 阶段补零而不是补符号位。
 wire [1:0] mem_size = (inst_ld_b | inst_ld_bu | inst_st_b) ? 2'd1 :
                       (inst_ld_h | inst_ld_hu | inst_st_h) ? 2'd2 : 2'd0;
 wire mem_unsigned = inst_ld_bu | inst_ld_hu;
@@ -348,6 +355,7 @@ wire [31:0] br_target =
     ds_pc + br_offs : rj_value + jirl_offs;
 
 assign br_bus = {br_taken, br_target};
+// 宽度和扩展方式跟着指令一起走，不能到 MEM/WB 再看 ID 中的当前指令。
 assign ds_to_es_bus = {
     alu_op, src1_is_pc, src2_is_imm,
     rj_value, rkd_value, imm,

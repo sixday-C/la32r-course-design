@@ -41,6 +41,7 @@ wire [31:0] ms_rkd_value;
 wire ms_res_from_mem;
 wire ms_gr_we;
 wire ms_mem_we;
+// 这些信息是 ID 发来的，与当前在 ID 的指令无关。
 wire [1:0] ms_mem_size;
 wire ms_mem_unsigned;
 wire [4:0] ms_dest;
@@ -53,13 +54,15 @@ assign {
 
 // 同一个 RAM 端口处理 word、byte 和 half。地址低两位决定落在哪个字节。
 assign data_sram_en = ms_valid && (ms_mem_we || ms_res_from_mem);
+// 例如 st.b 写地址 ...01，就只拉高第 1 个字节通道：0010。
+// st.h 写地址 ...10，则拉高高半字的两个通道：1100。
 wire [3:0] store_we = ms_mem_size == 2'd1 ?
                       (4'b0001 << ms_alu_result[1:0]) :
                       ms_mem_size == 2'd2 ?
                       (4'b0011 << ms_alu_result[1:0]) : 4'b1111;
 assign data_sram_we = {4{ms_valid && ms_mem_we}} & store_we;
 assign data_sram_addr = ms_alu_result;
-// 写 byte/half 时复制到每条字节通道，由 data_sram_we 选中目标通道。
+// RAM 的写数据仍是 32 位。把 byte/half 复制到各通道，写使能只选目标位置。
 assign data_sram_wdata = ms_mem_size == 2'd1 ?
                           {4{ms_rkd_value[7:0]}} :
                           ms_mem_size == 2'd2 ?
