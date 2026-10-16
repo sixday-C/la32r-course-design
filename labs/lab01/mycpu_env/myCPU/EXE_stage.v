@@ -15,7 +15,7 @@ reg es_valid;
 // EX stage 寄存器：接收 ID→EX bus，保存运算控制和操作数。
 reg [`DS_TO_ES_BUS_WD-1:0] es_bus_r;
 
-wire es_ready_go = 1'b1;
+wire es_ready_go;
 assign es_allowin = !es_valid || (es_ready_go && ms_allowin);
 assign es_to_ms_valid = es_valid && es_ready_go;
 
@@ -43,6 +43,7 @@ wire es_mem_we;
 // 地址在 EXE 算好；访问宽度和扩展方式原样带到后面两级。
 wire [1:0] es_mem_size;
 wire es_mem_unsigned;
+wire [2:0] es_md_op;
 wire [4:0] es_dest;
 wire [31:0] es_pc;
 
@@ -50,7 +51,7 @@ assign {
     es_alu_op, es_src1_is_pc, es_src2_is_imm,
     es_rj_value, es_rkd_value, es_imm,
     es_res_from_mem, es_gr_we, es_mem_we,
-    es_mem_size, es_mem_unsigned, es_dest, es_pc
+    es_mem_size, es_mem_unsigned, es_md_op, es_dest, es_pc
 } = es_bus_r;
 
 wire [31:0] alu_result;
@@ -62,13 +63,54 @@ alu u_alu (
     .alu_result (alu_result)
 );
 
+wire es_is_div = es_md_op == `MD_DIV_W || es_md_op == `MD_MOD_W ||
+                 es_md_op == `MD_DIV_WU || es_md_op == `MD_MOD_WU;
+wire es_div_signed = es_md_op == `MD_DIV_W || es_md_op == `MD_MOD_W;
+wire es_div_remainder = es_md_op == `MD_MOD_W || es_md_op == `MD_MOD_WU;
+
+// 低 32 位可直接取乘积低位；mulh.w 与 mulh.wu 的高位不同。
+wire signed [63:0] signed_product =
+    $signed(es_rj_value) * $signed(es_rkd_value);
+wire [63:0] unsigned_product = es_rj_value * es_rkd_value;
+
+wire div_busy;
+wire div_done;
+wire [31:0] div_quotient;
+wire [31:0] div_remainder;
+// 一条除法进入 EXE 后只启动一次；结果在被 MEM 接收前一直保持。
+wire div_start = es_valid && es_is_div && !div_busy && !div_done;
+wire div_consume = es_valid && es_is_div && div_done && ms_allowin;
+divider_iter u_divider (
+    .clk        (clk),
+    .reset      (reset),
+    .start      (div_start),
+    .consume    (div_consume),
+    .signed_div (es_div_signed),
+    .dividend   (es_rj_value),
+    .divisor    (es_rkd_value),
+    .busy       (div_busy),
+    .done       (div_done),
+    .quotient   (div_quotient),
+    .remainder  (div_remainder)
+);
+
+// 除法未完成时 EXE 保持当前指令，ID/IF 也会随 allowin 停下来。
+assign es_ready_go = !es_is_div || div_done;
+wire [31:0] es_result =
+    es_md_op == `MD_MUL_W   ? signed_product[31:0] :
+    es_md_op == `MD_MULH_W  ? signed_product[63:32] :
+    es_md_op == `MD_MULH_WU ? unsigned_product[63:32] :
+    es_is_div              ? (es_div_remainder ? div_remainder : div_quotient) :
+                             alu_result;
+
 assign es_to_ms_bus = {
-    es_pc, alu_result, es_rkd_value,
+    es_pc, es_result, es_rkd_value,
     es_res_from_mem, es_gr_we, es_mem_we,
     es_mem_size, es_mem_unsigned, es_dest
 };
 assign es_fwd_bus = {
-    es_valid, es_gr_we, es_res_from_mem, es_dest, alu_result
+    es_valid, es_gr_we, (es_res_from_mem || (es_is_div && !div_done)),
+    es_dest, es_result
 };
 
 endmodule

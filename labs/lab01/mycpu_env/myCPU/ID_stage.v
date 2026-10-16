@@ -105,6 +105,13 @@ wire inst_blt;
 wire inst_bge;
 wire inst_bltu;
 wire inst_bgeu;
+wire inst_mul_w;
+wire inst_mulh_w;
+wire inst_mulh_wu;
+wire inst_div_w;
+wire inst_mod_w;
+wire inst_div_wu;
+wire inst_mod_wu;
 
 assign inst_add_w = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                   & op_21_20_d[2'h1] & op_19_15_d[5'h00];
@@ -163,6 +170,21 @@ assign inst_blt      = op_31_26_d[6'h18];
 assign inst_bge      = op_31_26_d[6'h19];
 assign inst_bltu     = op_31_26_d[6'h1a];
 assign inst_bgeu     = op_31_26_d[6'h1b];
+// 乘法与除法都读 rj、rk；功能码决定取低位、高位、商还是余数。
+assign inst_mul_w    = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h1] & op_19_15_d[5'h18];
+assign inst_mulh_w   = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h1] & op_19_15_d[5'h19];
+assign inst_mulh_wu  = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h1] & op_19_15_d[5'h1a];
+assign inst_div_w    = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h2] & op_19_15_d[5'h00];
+assign inst_mod_w    = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h2] & op_19_15_d[5'h01];
+assign inst_div_wu   = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h2] & op_19_15_d[5'h02];
+assign inst_mod_wu   = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                     & op_21_20_d[2'h2] & op_19_15_d[5'h03];
 
 // -----------------------------------------------------------------------------
 // 控制信号、立即数和源寄存器
@@ -216,7 +238,8 @@ wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_bne    | inst_slti   | inst_sltui  | inst_andi |
                inst_ori    | inst_xori   | inst_sll_w  | inst_srl_w |
                inst_sra_w  | inst_blt    | inst_bge    | inst_bltu |
-               inst_bgeu;
+               inst_bgeu   | inst_mul_w  | inst_mulh_w | inst_mulh_wu |
+               inst_div_w  | inst_mod_w  | inst_div_wu | inst_mod_wu;
 
 // 当前指令是否真正需要读取第二个源寄存器。store 要读 rd 中待写入的数据。
 wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
@@ -224,7 +247,9 @@ wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
                 inst_st_w  | inst_st_b  | inst_st_h  | inst_beq |
                 inst_bne   | inst_sll_w |
                 inst_srl_w | inst_sra_w | inst_blt   | inst_bge |
-                inst_bltu  | inst_bgeu;
+                inst_bltu  | inst_bgeu  | inst_mul_w | inst_mulh_w |
+                inst_mulh_wu | inst_div_w | inst_mod_w | inst_div_wu |
+                inst_mod_wu;
 
 wire src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;
 // 访存地址用 rj + 符号扩展后的 i12；i12 可以是负偏移。
@@ -247,6 +272,14 @@ wire mem_we = inst_st_w | inst_st_b | inst_st_h;
 wire [1:0] mem_size = (inst_ld_b | inst_ld_bu | inst_st_b) ? 2'd1 :
                       (inst_ld_h | inst_ld_hu | inst_st_h) ? 2'd2 : 2'd0;
 wire mem_unsigned = inst_ld_bu | inst_ld_hu;
+// 把具体运算编号跟操作数一起送到 EXE，后续阶段只接收最终结果。
+wire [2:0] md_op = inst_mul_w   ? `MD_MUL_W   :
+                   inst_mulh_w  ? `MD_MULH_W  :
+                   inst_mulh_wu ? `MD_MULH_WU :
+                   inst_div_w   ? `MD_DIV_W   :
+                   inst_mod_w   ? `MD_MOD_W   :
+                   inst_div_wu  ? `MD_DIV_WU  :
+                   inst_mod_wu  ? `MD_MOD_WU  : `MD_NONE;
 wire [4:0] dest = inst_bl ? 5'd1 : rd;
 
 // -----------------------------------------------------------------------------
@@ -274,10 +307,10 @@ regfile u_regfile (
 
 wire es_valid;
 wire es_gr_we;
-wire es_res_from_mem;
+wire es_result_pending;
 wire [4:0] es_dest;
 wire [31:0] es_result;
-assign {es_valid, es_gr_we, es_res_from_mem,
+assign {es_valid, es_gr_we, es_result_pending,
         es_dest, es_result} = es_fwd_bus;
 
 wire ms_valid;
@@ -311,13 +344,13 @@ wire rkd_match_ws = need_rkd && rf_raddr2 != 0 && ws_valid &&
                     ws_gr_we && ws_dest != 0 && rf_raddr2 == ws_dest;
 
 wire [31:0] rj_value =
-    rj_match_es && !es_res_from_mem ? es_result :
+    rj_match_es && !es_result_pending ? es_result :
     !rj_match_es && rj_match_ms && !ms_res_from_mem ? ms_result :
     !rj_match_es && !rj_match_ms && rj_match_ws ? ws_result :
     rf_rdata1;
 
 wire [31:0] rkd_value =
-    rkd_match_es && !es_res_from_mem ? es_result :
+    rkd_match_es && !es_result_pending ? es_result :
     !rkd_match_es && rkd_match_ms && !ms_res_from_mem ? ms_result :
     !rkd_match_es && !rkd_match_ms && rkd_match_ws ? ws_result :
     rf_rdata2;
@@ -326,19 +359,19 @@ wire [31:0] rkd_value =
 // RAW 阻塞、分支与输出 bus
 // -----------------------------------------------------------------------------
 // 原来只要与后续阶段的目的寄存器相同就阻塞；加入前递后，
-// EXE/MEM 中的 load 结果尚未从 Block RAM 返回，只有这类无法前递的相关才 stall。
-// WB 阶段的 data_sram_rdata 已返回，可直接前递，不需要检查 ms_res_from_mem。
+// EXE 中的 load 或未完成的除法，以及 MEM 中的 load 暂时不能前递。
+// WB 阶段的 RAM 读数据已经返回，可以直接前递。
 wire rj_raw_conflict =
-    (rj_match_es && es_res_from_mem) ||
+    (rj_match_es && es_result_pending) ||
     (!rj_match_es && rj_match_ms && ms_res_from_mem);
 wire rkd_raw_conflict =
-    (rkd_match_es && es_res_from_mem) ||
+    (rkd_match_es && es_result_pending) ||
     (!rkd_match_es && rkd_match_ms && ms_res_from_mem);
 
 assign ds_ready_go = !(ds_valid && (rj_raw_conflict || rkd_raw_conflict));
 
-// 分支在 ID 阶段判断；操作数使用前递后的值，相关未解决时暂不跳转。
-// blt/bge 把寄存器值当有符号数；bltu/bgeu 把相同的位型当无符号数比较。
+// 分支在 ID 阶段判断，操作数就是前递之后的值。
+// 如果 EXE 还在做除法，先留在 ID，等 EXE 能接收时再通知 IF 跳转。
 assign br_taken =
     ((inst_beq && rj_value == rkd_value) ||
      (inst_bne && rj_value != rkd_value) ||
@@ -346,7 +379,7 @@ assign br_taken =
      (inst_bge && $signed(rj_value) >= $signed(rkd_value)) || // 有符号比较
      (inst_bltu && rj_value < rkd_value) || // 无符号比较
      (inst_bgeu && rj_value >= rkd_value) ||  //无符号比较
-     inst_jirl || inst_bl || inst_b) && ds_valid && ds_ready_go;
+     inst_jirl || inst_bl || inst_b) && ds_valid && ds_ready_go && es_allowin;
 
 // 相对分支以 ds_pc 为基址；jirl 以 rj_value 为基址。
 wire [31:0] br_target =
@@ -359,7 +392,8 @@ assign br_bus = {br_taken, br_target};
 assign ds_to_es_bus = {
     alu_op, src1_is_pc, src2_is_imm,
     rj_value, rkd_value, imm,
-    res_from_mem, gr_we, mem_we, mem_size, mem_unsigned, dest, ds_pc
+    res_from_mem, gr_we, mem_we, mem_size, mem_unsigned,
+    md_op, dest, ds_pc
 };
 
 endmodule
