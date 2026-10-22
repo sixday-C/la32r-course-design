@@ -3,6 +3,7 @@ module ID_stage(
     input  wire                        clk,
     input  wire                        reset,
     input  wire                        flush,
+    input  wire                        has_int,
     input  wire                        fs_to_ds_valid,
     input  wire [`FS_TO_DS_BUS_WD-1:0] fs_to_ds_bus,
     input  wire                        es_allowin,
@@ -21,6 +22,7 @@ reg ds_valid;
 // ID stage 寄存器：保存从 IF→ID bus 接收的指令和对应 PC。
 reg [31:0] ds_pc;
 reg [31:0] ds_inst;
+reg ds_adef;
 wire ds_ready_go;
 wire br_taken;
 
@@ -39,7 +41,7 @@ always @(posedge clk) begin
     end
 //当 IF 能传给 ID 阶段时，且 ID 阶段能接受的时候，ID 阶段就接收 IF→ID bus 的指令和 PC
     if (fs_to_ds_valid && ds_allowin) begin
-        {ds_inst, ds_pc} <= fs_to_ds_bus;
+        {ds_adef, ds_inst, ds_pc} <= fs_to_ds_bus;
     end
 end
 
@@ -117,6 +119,11 @@ wire inst_csrwr;
 wire inst_csrxchg;
 wire inst_ertn;
 wire inst_syscall;
+wire inst_break;
+wire inst_ine;
+wire inst_rdcntvl;
+wire inst_rdcntvh;
+wire inst_rdcntid;
 
 assign inst_add_w = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                   & op_21_20_d[2'h1] & op_19_15_d[5'h00];
@@ -198,6 +205,25 @@ assign inst_csrxchg = csr_opcode && rj >= 5'd2;
 assign inst_ertn = ds_inst == 32'h06483800;
 assign inst_syscall = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                     & op_21_20_d[2'h2] & op_19_15_d[5'h16];
+assign inst_break = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                  & op_21_20_d[2'h2] & op_19_15_d[5'h14];
+// 计数器读低/高位写 rd；rdcntid 把 TID 写到 rj。
+assign inst_rdcntvl = ds_inst[31:10] == 22'h18 && rj == 5'd0;
+assign inst_rdcntvh = ds_inst[31:10] == 22'h19 && rj == 5'd0;
+assign inst_rdcntid = ds_inst[31:10] == 22'h18 && rd == 5'd0 && rj != 5'd0;
+wire inst_known = inst_add_w | inst_sub_w | inst_slt | inst_sltu |
+    inst_nor | inst_and | inst_or | inst_xor | inst_slli_w | inst_srli_w |
+    inst_srai_w | inst_addi_w | inst_ld_w | inst_st_w | inst_ld_b |
+    inst_ld_h | inst_ld_bu | inst_ld_hu | inst_st_b | inst_st_h |
+    inst_jirl | inst_b | inst_bl | inst_beq | inst_bne | inst_lu12i_w |
+    inst_slti | inst_sltui | inst_andi | inst_ori | inst_xori |
+    inst_sll_w | inst_srl_w | inst_sra_w | inst_pcaddu12i |
+    inst_blt | inst_bge | inst_bltu | inst_bgeu |
+    inst_mul_w | inst_mulh_w | inst_mulh_wu | inst_div_w | inst_mod_w |
+    inst_div_wu | inst_mod_wu | inst_csrrd | inst_csrwr | inst_csrxchg |
+    inst_ertn | inst_syscall | inst_break | inst_rdcntvl |
+    inst_rdcntvh | inst_rdcntid;
+assign inst_ine = !inst_known;
 
 // -----------------------------------------------------------------------------
 // 控制信号、立即数和源寄存器
@@ -284,7 +310,7 @@ wire res_from_mem = inst_ld_w | inst_ld_b | inst_ld_h |
 wire gr_we = ~(inst_st_w | inst_st_b | inst_st_h |
                inst_beq | inst_bne | inst_blt |
                inst_bge | inst_bltu | inst_bgeu | inst_b |
-               inst_syscall | inst_ertn);
+               inst_syscall | inst_break | inst_ertn);
 wire mem_we = inst_st_w | inst_st_b | inst_st_h;
 
 // 00: word，01: byte，10: half；后两级根据 men_size 选字节使能或读回的数据。
@@ -300,11 +326,15 @@ wire [2:0] md_op = inst_mul_w   ? `MD_MUL_W   :
                    inst_mod_w   ? `MD_MOD_W   :
                    inst_div_wu  ? `MD_DIV_WU  :
                    inst_mod_wu  ? `MD_MOD_WU  : `MD_NONE;
-wire [4:0] dest = inst_bl ? 5'd1 : rd;
+wire [4:0] dest = inst_bl ? 5'd1 : inst_rdcntid ? rj : rd;
 wire [1:0] csr_op = inst_csrrd ? `CSR_RD :
                     inst_csrwr ? `CSR_WR :
                     inst_csrxchg ? `CSR_XCHG : `CSR_NONE;
-wire [5:0] ds_exc = {2'b0, inst_syscall, 3'b0};
+// 中断和译码异常只做标记，等指令走到 WB 再统一提交。
+wire [5:0] ds_exc = {inst_ine, inst_break, inst_syscall,
+                     1'b0, ds_adef, has_int};
+wire [1:0] cnt_op = inst_rdcntvl ? 2'd1 :
+                    inst_rdcntvh ? 2'd2 : inst_rdcntid ? 2'd3 : 2'd0;
 
 // -----------------------------------------------------------------------------
 // 寄存器堆与前递
@@ -430,7 +460,7 @@ assign ds_to_es_bus = {
     rj_value, rkd_value, imm,
     res_from_mem, gr_we, mem_we, mem_size, mem_unsigned,
     md_op, dest, ds_pc,
-    ds_exc, inst_ertn, csr_op, ds_inst[23:10]
+    ds_exc, inst_ertn, csr_op, ds_inst[23:10], cnt_op
 };
 
 endmodule

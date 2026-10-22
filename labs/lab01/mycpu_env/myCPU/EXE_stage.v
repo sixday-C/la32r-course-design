@@ -51,13 +51,14 @@ wire [5:0] es_exc;
 wire es_ertn;
 wire [1:0] es_csr_op;
 wire [13:0] es_csr_num;
+wire [1:0] es_cnt_op;
 
 assign {
     es_alu_op, es_src1_is_pc, es_src2_is_imm,
     es_rj_value, es_rkd_value, es_imm,
     es_res_from_mem, es_gr_we, es_mem_we,
     es_mem_size, es_mem_unsigned, es_md_op, es_dest, es_pc,
-    es_exc, es_ertn, es_csr_op, es_csr_num
+    es_exc, es_ertn, es_csr_op, es_csr_num, es_cnt_op
 } = es_bus_r;
 
 wire [31:0] alu_result;
@@ -109,17 +110,24 @@ wire [31:0] es_result =
     es_is_div              ? (es_div_remainder ? div_remainder : div_quotient) :
                              alu_result;
 
+// 半字需要 bit0=0，整字需要 bit[1:0]=0；出错时后级不能访问 RAM。
+wire es_mem_access = es_res_from_mem || es_mem_we;
+wire es_ale = es_mem_access &&
+              ((es_mem_size == 2'd2 && es_result[0]) ||
+               (es_mem_size == 2'd0 && |es_result[1:0]));
+wire [5:0] es_exc_out = es_exc | {3'b0, es_ale, 2'b0};
 assign es_to_ms_bus = {
     es_pc, es_result, es_rkd_value,
     es_res_from_mem, es_gr_we, es_mem_we,
     es_mem_size, es_mem_unsigned, es_dest,
-    es_exc, es_ertn, es_csr_op, es_csr_num,
+    es_exc_out, es_ertn, es_csr_op, es_csr_num,
     (es_csr_op == `CSR_WR ? 32'hffffffff : es_rj_value),
-    es_rkd_value
+    es_rkd_value, es_cnt_op
 };
 assign es_fwd_bus = {
     es_valid, es_gr_we, es_csr_op[1],
-    (es_res_from_mem || (es_is_div && !div_done) || es_csr_op != `CSR_NONE),
+    (es_res_from_mem || (es_is_div && !div_done) ||
+     es_csr_op != `CSR_NONE || es_cnt_op != 0),
     es_dest, es_result
 };
 //es_result_pending=es_res_from_mem || (es_is_div && !div_done); 当前指令是 load，或除法尚未算完时，该位为 1

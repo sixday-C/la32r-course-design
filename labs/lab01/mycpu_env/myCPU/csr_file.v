@@ -12,7 +12,12 @@ module csr_file(
     input  wire [5:0]  wb_ecode,
     input  wire [8:0]  wb_esubcode,
     input  wire [31:0] wb_pc,
+    input  wire [31:0] wb_badv,
     input  wire        ertn_flush,
+    input  wire [7:0]  hw_int_in,
+    output wire        has_int,
+    output wire [63:0] counter_value,
+    output wire [31:0] tid_value,
     output wire [31:0] ex_entry,
     output wire [31:0] ertn_entry
 );
@@ -31,9 +36,17 @@ reg       crmd_ie;
 reg [1:0] prmd_pplv;
 reg       prmd_pie;
 reg [1:0] estat_is_sw;
+reg [7:0] estat_is_hw;
+reg estat_is_timer;
 reg [5:0] estat_ecode;
 reg [8:0] estat_esubcode;
 reg [31:0] era;
+reg [31:0] badv;
+reg [12:0] ecfg_lie;
+reg [31:0] tid;
+reg [31:0] tcfg;
+reg [31:0] timer_cnt;
+reg [63:0] stable_counter;
 reg [25:0] eentry_va;
 reg [31:0] save0;
 reg [31:0] save1;
@@ -43,11 +56,19 @@ reg [31:0] save3;
 // 暂时只用直接地址翻译，因此 CRMD.DA 固定为 1，PG/DATF/DATM 固定为 0。
 wire [31:0] crmd_value = 32'h00000008 | {29'b0, crmd_ie, crmd_plv};
 wire [31:0] prmd_value = {29'b0, prmd_pie, prmd_pplv};
+wire [12:0] estat_is = {1'b0, estat_is_timer, 1'b0, estat_is_hw,
+                        estat_is_sw};
 wire [31:0] estat_value = {1'b0, estat_esubcode, estat_ecode,
-                           3'b0, 13'b0 | {11'b0, estat_is_sw}};
+                           3'b0, estat_is};
+wire [31:0] ecfg_value = {19'b0, ecfg_lie[12:11], 1'b0, ecfg_lie[9:0]};
 wire [31:0] eentry_value = {eentry_va, 6'b0};
 wire [31:0] crmd_next = masked_write(crmd_value, csr_wmask, csr_wvalue);
 wire [31:0] prmd_next = masked_write(prmd_value, csr_wmask, csr_wvalue);
+wire [31:0] tcfg_next = masked_write(tcfg, csr_wmask, csr_wvalue);
+
+assign has_int = crmd_ie && |(estat_is & ecfg_lie);
+assign counter_value = stable_counter;
+assign tid_value = tid;
 
 assign ex_entry = eentry_value;
 assign ertn_entry = era;
@@ -58,13 +79,19 @@ always @(*) begin
         case (csr_num)
             `CSR_CRMD:   csr_rvalue = crmd_value;
             `CSR_PRMD:   csr_rvalue = prmd_value;
+            `CSR_ECFG:   csr_rvalue = ecfg_value;
             `CSR_ESTAT:  csr_rvalue = estat_value;
             `CSR_ERA:    csr_rvalue = era;
+            `CSR_BADV:   csr_rvalue = badv;
             `CSR_EENTRY: csr_rvalue = eentry_value;
             `CSR_SAVE0:  csr_rvalue = save0;
             `CSR_SAVE1:  csr_rvalue = save1;
             `CSR_SAVE2:  csr_rvalue = save2;
             `CSR_SAVE3:  csr_rvalue = save3;
+            `CSR_TID:    csr_rvalue = tid;
+            `CSR_TCFG:   csr_rvalue = tcfg;
+            `CSR_TVAL:   csr_rvalue = timer_cnt;
+            `CSR_TICLR:  csr_rvalue = 32'b0;
             default:     csr_rvalue = 32'b0;
         endcase
     end
@@ -77,15 +104,36 @@ always @(posedge clk) begin
         prmd_pplv <= 2'b0;
         prmd_pie <= 1'b0;
         estat_is_sw <= 2'b0;
+        estat_is_hw <= 8'b0;
+        estat_is_timer <= 1'b0;
         estat_ecode <= 6'b0;
         estat_esubcode <= 9'b0;
         era <= 32'b0;
+        badv <= 32'b0;
+        ecfg_lie <= 13'b0;
+        tid <= 32'b0;
+        tcfg <= 32'b0;
+        timer_cnt <= 32'hffffffff;
+        stable_counter <= 64'b0;
         eentry_va <= 26'b0;
         save0 <= 32'b0;
         save1 <= 32'b0;
         save2 <= 32'b0;
         save3 <= 32'b0;
     end else begin
+        // 硬件中断每拍采样；计时器减到 0 时置位，写 TICLR 清除。
+        estat_is_hw <= hw_int_in;
+        stable_counter <= stable_counter + 64'd1;
+        if (csr_we && csr_num == `CSR_TCFG && tcfg_next[0])
+            timer_cnt <= {tcfg_next[31:2], 2'b0};
+        else if (tcfg[0] && timer_cnt != 32'hffffffff)
+            timer_cnt <= timer_cnt == 0 && tcfg[1] ?
+                         {tcfg[31:2], 2'b0} : timer_cnt - 32'd1;
+        if (tcfg[0] && timer_cnt == 0)
+            estat_is_timer <= 1'b1;
+        else if (csr_we && csr_num == `CSR_TICLR &&
+                 csr_wmask[0] && csr_wvalue[0])
+            estat_is_timer <= 1'b0;
         // 异常先保存原来的特权级和中断使能；ertn 再把它们恢复。
         if (wb_ex) begin
             prmd_pplv <= crmd_plv;
@@ -95,6 +143,8 @@ always @(posedge clk) begin
             estat_ecode <= wb_ecode;
             estat_esubcode <= wb_esubcode;
             era <= wb_pc;
+            if (wb_ecode == 6'h08 || wb_ecode == 6'h09)
+                badv <= wb_badv;
         end else if (ertn_flush) begin
             crmd_plv <= prmd_pplv;
             crmd_ie <= prmd_pie;
@@ -108,15 +158,20 @@ always @(posedge clk) begin
                     prmd_pplv <= prmd_next[1:0];
                     prmd_pie <= prmd_next[2];
                 end
+                `CSR_ECFG: ecfg_lie <= masked_write(ecfg_value,
+                                                   csr_wmask, csr_wvalue);
                 `CSR_ESTAT: estat_is_sw <= masked_write(estat_value,
                                                        csr_wmask, csr_wvalue);
                 `CSR_ERA: era <= masked_write(era, csr_wmask, csr_wvalue);
+                `CSR_BADV: badv <= masked_write(badv, csr_wmask, csr_wvalue);
                 `CSR_EENTRY: eentry_va <= masked_write(eentry_value,
                                                        csr_wmask, csr_wvalue) >> 6;
                 `CSR_SAVE0: save0 <= masked_write(save0, csr_wmask, csr_wvalue);
                 `CSR_SAVE1: save1 <= masked_write(save1, csr_wmask, csr_wvalue);
                 `CSR_SAVE2: save2 <= masked_write(save2, csr_wmask, csr_wvalue);
                 `CSR_SAVE3: save3 <= masked_write(save3, csr_wmask, csr_wvalue);
+                `CSR_TID: tid <= masked_write(tid, csr_wmask, csr_wvalue);
+                `CSR_TCFG: tcfg <= tcfg_next;
                 default: ;
             endcase
         end

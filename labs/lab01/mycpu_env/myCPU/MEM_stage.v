@@ -52,13 +52,14 @@ wire [1:0] ms_csr_op;
 wire [13:0] ms_csr_num;
 wire [31:0] ms_csr_wmask;
 wire [31:0] ms_csr_wvalue;
+wire [1:0] ms_cnt_op;
 
 assign {
     ms_pc, ms_alu_result, ms_rkd_value,
     ms_res_from_mem, ms_gr_we, ms_mem_we,
     ms_mem_size, ms_mem_unsigned, ms_dest,
     ms_exc, ms_ertn, ms_csr_op, ms_csr_num,
-    ms_csr_wmask, ms_csr_wvalue
+    ms_csr_wmask, ms_csr_wvalue, ms_cnt_op
 } = ms_bus_r;
 
 // 同一个 RAM 端口处理 word、byte 和 half。地址低两位决定落在哪个字节。
@@ -83,11 +84,12 @@ assign ms_to_ws_bus = {
     ms_pc, ms_alu_result, ms_res_from_mem, ms_gr_we,
     ms_mem_size, ms_mem_unsigned, ms_dest,
     ms_exc, ms_ertn, ms_csr_op, ms_csr_num,
-    ms_csr_wmask, ms_csr_wvalue
+    ms_csr_wmask, ms_csr_wvalue, ms_cnt_op
 };
 assign ms_fwd_bus = {
     ms_valid, ms_gr_we, ms_csr_op[1],
-    (ms_res_from_mem || ms_csr_op != `CSR_NONE), ms_dest, ms_alu_result
+    (ms_res_from_mem || ms_csr_op != `CSR_NONE || ms_cnt_op != 0),
+    ms_dest, ms_alu_result
 };
 
 endmodule

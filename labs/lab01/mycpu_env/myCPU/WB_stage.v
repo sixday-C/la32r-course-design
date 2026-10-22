@@ -9,6 +9,8 @@ module WB_stage(
     output wire [`WS_FWD_BUS_WD-1:0]   ws_fwd_bus,
     input  wire [31:0]                 data_sram_rdata,
     input  wire [31:0]                 csr_rvalue,
+    input  wire [63:0]                 counter_value,
+    input  wire [31:0]                 tid_value,
     output wire                        csr_re,
     output wire [13:0]                 csr_num,
     output wire                        csr_we,
@@ -59,12 +61,13 @@ wire [1:0] ws_csr_op;
 wire [13:0] ws_csr_num;
 wire [31:0] ws_csr_wmask;
 wire [31:0] ws_csr_wvalue;
+wire [1:0] ws_cnt_op;
 
 assign {
     ws_pc, ws_alu_result, ws_res_from_mem, ws_gr_we,
     ws_mem_size, ws_mem_unsigned, ws_dest,
     ws_exc, ws_ertn, ws_csr_op, ws_csr_num,
-    ws_csr_wmask, ws_csr_wvalue
+    ws_csr_wmask, ws_csr_wvalue, ws_cnt_op
 } = ws_bus_r;
 
 assign wb_ex = ws_valid && |ws_exc;
@@ -97,6 +100,9 @@ wire [31:0] load_result =
         data_sram_rdata;
 wire [31:0] final_result =
     ws_csr_op != `CSR_NONE ? csr_rvalue :
+    ws_cnt_op == 2'd1 ? counter_value[31:0] :
+    ws_cnt_op == 2'd2 ? counter_value[63:32] :
+    ws_cnt_op == 2'd3 ? tid_value :
     ws_res_from_mem ? load_result : ws_alu_result;
 wire rf_we = ws_valid && ws_gr_we && !wb_flush;
 

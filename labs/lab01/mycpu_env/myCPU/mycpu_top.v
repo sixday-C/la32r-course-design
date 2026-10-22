@@ -2,6 +2,7 @@
 module mycpu_top(
     input  wire        clk,
     input  wire        resetn,
+    input  wire [7:0]  hw_int_in,
 
     // inst sram interface
     output wire        inst_sram_en,
@@ -62,6 +63,9 @@ wire [13:0] csr_num;
 wire csr_we;
 wire [31:0] csr_wmask;
 wire [31:0] csr_wvalue;
+wire has_int;
+wire [63:0] counter_value;
+wire [31:0] tid_value;
 
 // 五级流水级通过 bus 传递数据；顶层只负责连线。
 IF_stage u_if (
@@ -84,6 +88,7 @@ ID_stage u_id (
     .clk             (clk),
     .reset           (reset),
     .flush           (wb_flush),
+    .has_int         (has_int),
     .fs_to_ds_valid  (fs_to_ds_valid),
     .fs_to_ds_bus    (fs_to_ds_bus),
     .ds_allowin      (ds_allowin),
@@ -137,6 +142,8 @@ WB_stage u_wb (
     .ws_fwd_bus        (ws_fwd_bus),
     .data_sram_rdata   (data_sram_rdata),
     .csr_rvalue       (csr_rvalue),
+    .counter_value    (counter_value),
+    .tid_value        (tid_value),
     .csr_re           (csr_re),
     .csr_num          (csr_num),
     .csr_we           (csr_we),
@@ -167,7 +174,12 @@ csr_file u_csr (
     .wb_ecode     (wb_ecode),
     .wb_esubcode  (wb_esubcode),
     .wb_pc        (debug_wb_pc),
+    .wb_badv      (wb_badv),
     .ertn_flush  (wb_ertn),
+    .hw_int_in   (hw_int_in),
+    .has_int     (has_int),
+    .counter_value(counter_value),
+    .tid_value   (tid_value),
     .ex_entry     (ex_entry),
     .ertn_entry   (ertn_entry)
 );

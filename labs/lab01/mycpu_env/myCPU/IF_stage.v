@@ -22,6 +22,7 @@ assign {br_taken, br_target} = br_bus;
 reg [31:0] pc;
 reg [31:0] fs_pc;
 reg fs_valid;
+reg fs_adef;
 
 //IF 阶段不需要等待处理，所以 ready_go 永远为 1
 wire fs_ready_go = 1'b1;
@@ -30,7 +31,7 @@ wire fs_allowin = !fs_valid || (fs_ready_go && ds_allowin);
 //IF 是否有一条准备好的有效指令可以交给 ID
 assign fs_to_ds_valid = fs_valid && fs_ready_go;
 // IF→ID bus：送到 ID 阶段的指令和 PC
-assign fs_to_ds_bus = {inst_sram_rdata, fs_pc};
+assign fs_to_ds_bus = {fs_adef, inst_sram_rdata, fs_pc};
 
 // pc 更新逻辑，分支跳转时用 br_target 替代顺序地址
 always @(posedge clk) begin
@@ -51,10 +52,12 @@ always @(posedge clk) begin
     end else if (fs_allowin && ds_allowin) begin
         fs_valid <= 1'b1;
         fs_pc <= pc;
+        // PC 不按字对齐时只把异常标志送下去，不访问指令 RAM。
+        fs_adef <= |pc[1:0];
     end
 end
 
-assign inst_sram_en = fs_allowin && ds_allowin && !flush;
+assign inst_sram_en = fs_allowin && ds_allowin && !flush && !(|pc[1:0]);
 assign inst_sram_we = 4'b0;
 assign inst_sram_addr = pc; // 取 inst 地址
 assign inst_sram_wdata = 32'b0;
