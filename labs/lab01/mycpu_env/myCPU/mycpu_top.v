@@ -48,11 +48,27 @@ wire [`WS_TO_RF_BUS_WD-1:0] ws_to_rf_bus;
 wire [`ES_FWD_BUS_WD-1:0]   es_fwd_bus;
 wire [`MS_FWD_BUS_WD-1:0]   ms_fwd_bus;
 wire [`WS_FWD_BUS_WD-1:0]   ws_fwd_bus;
+wire wb_flush;
+wire wb_ex;
+wire wb_ertn;
+wire [5:0] wb_ecode;
+wire [8:0] wb_esubcode;
+wire [31:0] wb_badv;
+wire [31:0] ex_entry;
+wire [31:0] ertn_entry;
+wire [31:0] csr_rvalue;
+wire csr_re;
+wire [13:0] csr_num;
+wire csr_we;
+wire [31:0] csr_wmask;
+wire [31:0] csr_wvalue;
 
 // 五级流水级通过 bus 传递数据；顶层只负责连线。
 IF_stage u_if (
     .clk             (clk),
     .reset           (reset),
+    .flush           (wb_flush),
+    .flush_pc        (wb_ex ? ex_entry : ertn_entry),
     .ds_allowin      (ds_allowin),
     .br_bus          (br_bus),
     .fs_to_ds_valid  (fs_to_ds_valid),
@@ -67,6 +83,7 @@ IF_stage u_if (
 ID_stage u_id (
     .clk             (clk),
     .reset           (reset),
+    .flush           (wb_flush),
     .fs_to_ds_valid  (fs_to_ds_valid),
     .fs_to_ds_bus    (fs_to_ds_bus),
     .ds_allowin      (ds_allowin),
@@ -83,6 +100,7 @@ ID_stage u_id (
 EXE_stage u_exe (
     .clk            (clk),
     .reset          (reset),
+    .flush          (wb_flush),
     .ds_to_es_valid (ds_to_es_valid),
     .ds_to_es_bus   (ds_to_es_bus),
     .es_allowin     (es_allowin),
@@ -95,6 +113,7 @@ EXE_stage u_exe (
 MEM_stage u_mem (
     .clk             (clk),
     .reset           (reset),
+    .flush           (wb_flush),
     .es_to_ms_valid  (es_to_ms_valid),
     .es_to_ms_bus    (es_to_ms_bus),
     .ms_allowin      (ms_allowin),
@@ -117,10 +136,40 @@ WB_stage u_wb (
     .ws_to_rf_bus      (ws_to_rf_bus),
     .ws_fwd_bus        (ws_fwd_bus),
     .data_sram_rdata   (data_sram_rdata),
+    .csr_rvalue       (csr_rvalue),
+    .csr_re           (csr_re),
+    .csr_num          (csr_num),
+    .csr_we           (csr_we),
+    .csr_wmask        (csr_wmask),
+    .csr_wvalue       (csr_wvalue),
+    .wb_flush         (wb_flush),
+    .wb_ex            (wb_ex),
+    .wb_ertn          (wb_ertn),
+    .wb_ecode         (wb_ecode),
+    .wb_esubcode      (wb_esubcode),
+    .wb_badv          (wb_badv),
     .debug_wb_pc       (debug_wb_pc),
     .debug_wb_rf_we    (debug_wb_rf_we),
     .debug_wb_rf_wnum  (debug_wb_rf_wnum),
     .debug_wb_rf_wdata (debug_wb_rf_wdata)
+);
+
+csr_file u_csr (
+    .clk          (clk),
+    .reset        (reset),
+    .csr_re       (csr_re),
+    .csr_num      (csr_num),
+    .csr_rvalue   (csr_rvalue),
+    .csr_we       (csr_we),
+    .csr_wmask    (csr_wmask),
+    .csr_wvalue   (csr_wvalue),
+    .wb_ex        (wb_ex),
+    .wb_ecode     (wb_ecode),
+    .wb_esubcode  (wb_esubcode),
+    .wb_pc        (debug_wb_pc),
+    .ertn_flush  (wb_ertn),
+    .ex_entry     (ex_entry),
+    .ertn_entry   (ertn_entry)
 );
 
 endmodule

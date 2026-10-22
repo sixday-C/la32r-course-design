@@ -8,6 +8,18 @@ module WB_stage(
     output wire [`WS_TO_RF_BUS_WD-1:0] ws_to_rf_bus,
     output wire [`WS_FWD_BUS_WD-1:0]   ws_fwd_bus,
     input  wire [31:0]                 data_sram_rdata,
+    input  wire [31:0]                 csr_rvalue,
+    output wire                        csr_re,
+    output wire [13:0]                 csr_num,
+    output wire                        csr_we,
+    output wire [31:0]                 csr_wmask,
+    output wire [31:0]                 csr_wvalue,
+    output wire                        wb_flush,
+    output wire                        wb_ex,
+    output wire                        wb_ertn,
+    output wire [5:0]                  wb_ecode,
+    output wire [8:0]                  wb_esubcode,
+    output wire [31:0]                 wb_badv,
     output wire [31:0]                 debug_wb_pc,
     output wire [3:0]                  debug_wb_rf_we,
     output wire [4:0]                  debug_wb_rf_wnum,
@@ -22,7 +34,7 @@ wire ws_ready_go = 1'b1;
 assign ws_allowin = !ws_valid || ws_ready_go;
 
 always @(posedge clk) begin
-    if (reset) begin
+    if (reset || wb_flush) begin
         ws_valid <= 1'b0;
     end else if (ws_allowin) begin
         ws_valid <= ms_to_ws_valid;
@@ -41,11 +53,37 @@ wire ws_gr_we;
 wire [1:0] ws_mem_size;
 wire ws_mem_unsigned;
 wire [4:0] ws_dest;
+wire [5:0] ws_exc;
+wire ws_ertn;
+wire [1:0] ws_csr_op;
+wire [13:0] ws_csr_num;
+wire [31:0] ws_csr_wmask;
+wire [31:0] ws_csr_wvalue;
 
 assign {
     ws_pc, ws_alu_result, ws_res_from_mem, ws_gr_we,
-    ws_mem_size, ws_mem_unsigned, ws_dest
+    ws_mem_size, ws_mem_unsigned, ws_dest,
+    ws_exc, ws_ertn, ws_csr_op, ws_csr_num,
+    ws_csr_wmask, ws_csr_wvalue
 } = ws_bus_r;
+
+assign wb_ex = ws_valid && |ws_exc;
+assign wb_ertn = ws_valid && ws_ertn && !wb_ex;
+assign wb_flush = wb_ex || wb_ertn;
+assign wb_ecode = ws_exc[`EXC_INT]  ? 6'h00 :
+                  ws_exc[`EXC_ADEF] ? 6'h08 :
+                  ws_exc[`EXC_ALE]  ? 6'h09 :
+                  ws_exc[`EXC_SYS]  ? 6'h0b :
+                  ws_exc[`EXC_BRK]  ? 6'h0c : 6'h0d;
+assign wb_esubcode = 9'b0;
+assign wb_badv = ws_exc[`EXC_ADEF] ? ws_pc : ws_alu_result;
+
+// CSR 访问统一留到 WB：先读旧值，再在这个时钟沿写入新值。
+assign csr_re = ws_valid && ws_csr_op != `CSR_NONE && !wb_flush;
+assign csr_num = ws_csr_num;
+assign csr_we = ws_valid && ws_csr_op[1] && !wb_flush;
+assign csr_wmask = ws_csr_wmask;
+assign csr_wvalue = ws_csr_wvalue;
 
 // RAM 返回整字；按原地址挑出 byte/half，再决定符号扩展还是零扩展。
 // 例如地址 ...11 读 byte，就把最高字节移到最低 8 位。
@@ -58,12 +96,13 @@ wire [31:0] load_result =
         {{16{shifted_rdata[15] && !ws_mem_unsigned}}, shifted_rdata[15:0]} :
         data_sram_rdata;
 wire [31:0] final_result =
+    ws_csr_op != `CSR_NONE ? csr_rvalue :
     ws_res_from_mem ? load_result : ws_alu_result;
-wire rf_we = ws_valid && ws_gr_we;
+wire rf_we = ws_valid && ws_gr_we && !wb_flush;
 
 // 写回寄存器堆，并给 ID 阶段提供最终结果的前递。
 assign ws_to_rf_bus = {rf_we, ws_dest, final_result};
-assign ws_fwd_bus = {ws_valid, ws_gr_we, ws_dest, final_result};
+assign ws_fwd_bus = {ws_valid, ws_gr_we, ws_csr_op[1], ws_dest, final_result};
 
 // debug info generate
 assign debug_wb_pc = ws_pc;

@@ -2,6 +2,8 @@
 module IF_stage(
     input  wire                        clk,
     input  wire                        reset,
+    input  wire                        flush,
+    input  wire [31:0]                 flush_pc,
     input  wire                        ds_allowin,
     input  wire [`BR_BUS_WD-1:0]       br_bus,
     output wire                        fs_to_ds_valid,
@@ -34,13 +36,15 @@ assign fs_to_ds_bus = {inst_sram_rdata, fs_pc};
 always @(posedge clk) begin
     if (reset) begin
         pc <= 32'h1c000000;
+    end else if (flush) begin
+        pc <= flush_pc;
     end else if (fs_allowin && ds_allowin) begin
         pc <= br_taken ? br_target : pc + 32'd4;
     end
 end
 //
 always @(posedge clk) begin
-    if (reset) begin
+    if (reset || flush) begin
         fs_valid <= 1'b0;
     end else if (br_taken) begin
         fs_valid <= 1'b0; //跳转的时候，IF 阶段的指令无效作废
@@ -50,7 +54,7 @@ always @(posedge clk) begin
     end
 end
 
-assign inst_sram_en = fs_allowin && ds_allowin;
+assign inst_sram_en = fs_allowin && ds_allowin && !flush;
 assign inst_sram_we = 4'b0;
 assign inst_sram_addr = pc; // 取 inst 地址
 assign inst_sram_wdata = 32'b0;

@@ -2,6 +2,7 @@
 module ID_stage(
     input  wire                        clk,
     input  wire                        reset,
+    input  wire                        flush,
     input  wire                        fs_to_ds_valid,
     input  wire [`FS_TO_DS_BUS_WD-1:0] fs_to_ds_bus,
     input  wire                        es_allowin,
@@ -29,7 +30,7 @@ assign ds_allowin = !ds_valid || (ds_ready_go && es_allowin);
 assign ds_to_es_valid = ds_valid && ds_ready_go;
 
 always @(posedge clk) begin
-    if (reset) begin
+    if (reset || flush) begin
         ds_valid <= 1'b0;
     end else if (br_taken) begin
         ds_valid <= 1'b0;
@@ -111,6 +112,11 @@ wire inst_div_w;
 wire inst_mod_w;
 wire inst_div_wu;
 wire inst_mod_wu;
+wire inst_csrrd;
+wire inst_csrwr;
+wire inst_csrxchg;
+wire inst_ertn;
+wire inst_syscall;
 
 assign inst_add_w = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                   & op_21_20_d[2'h1] & op_19_15_d[5'h00];
@@ -184,6 +190,14 @@ assign inst_div_wu   = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                      & op_21_20_d[2'h2] & op_19_15_d[5'h02];
 assign inst_mod_wu   = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                      & op_21_20_d[2'h2] & op_19_15_d[5'h03];
+// CSR 指令的 rj=0 表示读，rj=1 表示写，其余值表示按 rj 掩码交换。
+wire csr_opcode = ds_inst[31:24] == 8'h04;
+assign inst_csrrd = csr_opcode && rj == 5'd0;
+assign inst_csrwr = csr_opcode && rj == 5'd1;
+assign inst_csrxchg = csr_opcode && rj >= 5'd2;
+assign inst_ertn = ds_inst == 32'h06483800;
+assign inst_syscall = op_31_26_d[6'h00] & op_25_22_d[4'h0]
+                    & op_21_20_d[2'h2] & op_19_15_d[5'h16];
 
 // -----------------------------------------------------------------------------
 // 控制信号、立即数和源寄存器
@@ -223,7 +237,8 @@ wire [31:0] br_offs = need_si26 ? {{4{i26[25]}}, i26, 2'b0} :
 wire [31:0] jirl_offs = {{14{i16[15]}}, i16, 2'b0};
 // store 的 rd 是要写入内存的数据的寄存器，不是这条指令的目的寄存器，因为 store 就是存数据到内存
 wire src_reg_is_rd = inst_beq | inst_bne | inst_blt | inst_bge |
-                     inst_bltu | inst_bgeu | inst_st_w | inst_st_b | inst_st_h;
+                     inst_bltu | inst_bgeu | inst_st_w | inst_st_b | inst_st_h |
+                     inst_csrwr | inst_csrxchg;
 
 // 当前指令是否真正需要读取第一个源寄存器 rj
 //  sll.w r6,r4,r5 会拿 r4 的值左移，r4 依赖前一条指令时也要前递或阻塞
@@ -238,7 +253,8 @@ wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_ori    | inst_xori   | inst_sll_w  | inst_srl_w |
                inst_sra_w  | inst_blt    | inst_bge    | inst_bltu |
                inst_bgeu   | inst_mul_w  | inst_mulh_w | inst_mulh_wu |
-               inst_div_w  | inst_mod_w  | inst_div_wu | inst_mod_wu;
+               inst_div_w  | inst_mod_w  | inst_div_wu | inst_mod_wu |
+               inst_csrxchg;
 
 // 当前指令是否真正需要读取第二个源寄存器。store 要读 rd 中待写入的数据。
 wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
@@ -248,7 +264,7 @@ wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
                 inst_srl_w | inst_sra_w | inst_blt   | inst_bge |
                 inst_bltu  | inst_bgeu  | inst_mul_w | inst_mulh_w |
                 inst_mulh_wu | inst_div_w | inst_mod_w | inst_div_wu |
-                inst_mod_wu;
+                inst_mod_wu | inst_csrwr | inst_csrxchg;
 
 wire src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;// 这些指令的第一个操作数是 PC
 
@@ -267,7 +283,8 @@ wire res_from_mem = inst_ld_w | inst_ld_b | inst_ld_h |
 // bl 要写链接地址到寄存器 1，不能和其他分支一起关闭写回，故删去 bl。
 wire gr_we = ~(inst_st_w | inst_st_b | inst_st_h |
                inst_beq | inst_bne | inst_blt |
-               inst_bge | inst_bltu | inst_bgeu | inst_b);
+               inst_bge | inst_bltu | inst_bgeu | inst_b |
+               inst_syscall | inst_ertn);
 wire mem_we = inst_st_w | inst_st_b | inst_st_h;
 
 // 00: word，01: byte，10: half；后两级根据 men_size 选字节使能或读回的数据。
@@ -284,6 +301,10 @@ wire [2:0] md_op = inst_mul_w   ? `MD_MUL_W   :
                    inst_div_wu  ? `MD_DIV_WU  :
                    inst_mod_wu  ? `MD_MOD_WU  : `MD_NONE;
 wire [4:0] dest = inst_bl ? 5'd1 : rd;
+wire [1:0] csr_op = inst_csrrd ? `CSR_RD :
+                    inst_csrwr ? `CSR_WR :
+                    inst_csrxchg ? `CSR_XCHG : `CSR_NONE;
+wire [5:0] ds_exc = {2'b0, inst_syscall, 3'b0};
 
 // -----------------------------------------------------------------------------
 // 寄存器堆与前递
@@ -310,25 +331,28 @@ regfile u_regfile (
 
 wire es_valid;
 wire es_gr_we;
+wire es_csr_write;
 wire es_result_pending;
 wire [4:0] es_dest;
 wire [31:0] es_result;
-assign {es_valid, es_gr_we, es_result_pending,
+assign {es_valid, es_gr_we, es_csr_write, es_result_pending,
         es_dest, es_result} = es_fwd_bus;
 
 wire ms_valid;
 wire ms_gr_we;
+wire ms_csr_write;
 wire ms_res_from_mem;
 wire [4:0] ms_dest;
 wire [31:0] ms_result;
-assign {ms_valid, ms_gr_we, ms_res_from_mem,
+assign {ms_valid, ms_gr_we, ms_csr_write, ms_res_from_mem,
         ms_dest, ms_result} = ms_fwd_bus;
 
 wire ws_valid;
 wire ws_gr_we;
+wire ws_csr_write;
 wire [4:0] ws_dest;
 wire [31:0] ws_result;
-assign {ws_valid, ws_gr_we, ws_dest, ws_result} = ws_fwd_bus;
+assign {ws_valid, ws_gr_we, ws_csr_write, ws_dest, ws_result} = ws_fwd_bus;
 
 // forwarding：先判断读寄存器是否命中后续阶段，优先级 EXE > MEM > WB。
 // 只有确实需要该源寄存器时才检查相关；0 号寄存器不参与前递。
@@ -373,7 +397,12 @@ wire rkd_raw_conflict =
     (!rkd_match_es && rkd_match_ms && ms_res_from_mem);
 
 // 决定了 ds_ready_go 的值。只有当当前指令有效且没有 RAW 冲突时，ds_ready_go 才为 1。
-assign ds_ready_go = !(ds_valid && (rj_raw_conflict || rkd_raw_conflict));
+// CSR 统一在 WB 读写；前面的 CSR 写者全部走完后才放行下一条指令。
+wire csr_hazard = (es_valid && es_csr_write) ||
+                  (ms_valid && ms_csr_write) ||
+                  (ws_valid && ws_csr_write);
+assign ds_ready_go = !(ds_valid &&
+                       (rj_raw_conflict || rkd_raw_conflict || csr_hazard));
 
 // 分支在 ID 阶段判断，操作数就是前递之后的值。
 // 如果 EXE 还在做除法，先留在 ID，等 EXE 能接收时再通知 IF 跳转。
@@ -384,7 +413,8 @@ assign br_taken =
      (inst_bge && $signed(rj_value) >= $signed(rkd_value)) || // 有符号比较
      (inst_bltu && rj_value < rkd_value) || // 无符号比较
      (inst_bgeu && rj_value >= rkd_value) ||  //无符号比较
-     inst_jirl || inst_bl || inst_b) && ds_valid && ds_ready_go && es_allowin;
+     inst_jirl || inst_bl || inst_b) && ds_valid && ds_ready_go &&
+     es_allowin && !(|ds_exc) && !flush;
 
 // 相对分支以 ds_pc 为基址；jirl 以 rj_value 为基址。
 wire [31:0] br_target =
@@ -399,7 +429,8 @@ assign ds_to_es_bus = {
     alu_op, src1_is_pc, src2_is_imm,
     rj_value, rkd_value, imm,
     res_from_mem, gr_we, mem_we, mem_size, mem_unsigned,
-    md_op, dest, ds_pc
+    md_op, dest, ds_pc,
+    ds_exc, inst_ertn, csr_op, ds_inst[23:10]
 };
 
 endmodule

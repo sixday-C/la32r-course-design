@@ -2,6 +2,7 @@
 module EXE_stage(
     input  wire                        clk,
     input  wire                        reset,
+    input  wire                        flush,
     input  wire                        ds_to_es_valid,
     input  wire [`DS_TO_ES_BUS_WD-1:0] ds_to_es_bus,
     input  wire                        ms_allowin,
@@ -20,7 +21,7 @@ assign es_allowin = !es_valid || (es_ready_go && ms_allowin);
 assign es_to_ms_valid = es_valid && es_ready_go;
 
 always @(posedge clk) begin
-    if (reset) begin
+    if (reset || flush) begin
         es_valid <= 1'b0;
     end else if (es_allowin) begin
         es_valid <= ds_to_es_valid;
@@ -46,12 +47,17 @@ wire es_mem_unsigned;
 wire [2:0] es_md_op;
 wire [4:0] es_dest;
 wire [31:0] es_pc;
+wire [5:0] es_exc;
+wire es_ertn;
+wire [1:0] es_csr_op;
+wire [13:0] es_csr_num;
 
 assign {
     es_alu_op, es_src1_is_pc, es_src2_is_imm,
     es_rj_value, es_rkd_value, es_imm,
     es_res_from_mem, es_gr_we, es_mem_we,
-    es_mem_size, es_mem_unsigned, es_md_op, es_dest, es_pc
+    es_mem_size, es_mem_unsigned, es_md_op, es_dest, es_pc,
+    es_exc, es_ertn, es_csr_op, es_csr_num
 } = es_bus_r;
 
 wire [31:0] alu_result;
@@ -82,7 +88,7 @@ wire div_start = es_valid && es_is_div && !div_busy && !div_done;
 wire div_consume = es_valid && es_is_div && div_done && ms_allowin;
 divider_iter u_divider (
     .clk        (clk),
-    .reset      (reset),
+    .reset      (reset || flush),
     .start      (div_start),
     .consume    (div_consume),
     .signed_div (es_div_signed),
@@ -106,10 +112,14 @@ wire [31:0] es_result =
 assign es_to_ms_bus = {
     es_pc, es_result, es_rkd_value,
     es_res_from_mem, es_gr_we, es_mem_we,
-    es_mem_size, es_mem_unsigned, es_dest
+    es_mem_size, es_mem_unsigned, es_dest,
+    es_exc, es_ertn, es_csr_op, es_csr_num,
+    (es_csr_op == `CSR_WR ? 32'hffffffff : es_rj_value),
+    es_rkd_value
 };
 assign es_fwd_bus = {
-    es_valid, es_gr_we, (es_res_from_mem || (es_is_div && !div_done)),
+    es_valid, es_gr_we, es_csr_op[1],
+    (es_res_from_mem || (es_is_div && !div_done) || es_csr_op != `CSR_NONE),
     es_dest, es_result
 };
 //es_result_pending=es_res_from_mem || (es_is_div && !div_done); 当前指令是 load，或除法尚未算完时，该位为 1
