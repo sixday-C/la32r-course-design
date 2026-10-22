@@ -15,9 +15,7 @@ module ID_stage(
     input  wire [`WS_TO_RF_BUS_WD-1:0] ws_to_rf_bus
 );
 
-// -----------------------------------------------------------------------------
-// ID 流水寄存器与握手
-// -----------------------------------------------------------------------------
+
 reg ds_valid;
 // ID stage 寄存器：保存从 IF→ID bus 接收的指令和对应 PC。
 reg [31:0] ds_pc;
@@ -25,7 +23,9 @@ reg [31:0] ds_inst;
 wire ds_ready_go;
 wire br_taken;
 
+//ID 阶段允许被进入的条件是，ID 阶段没有处理的工作 或者 ID 阶段处理完了且 EXE 阶段允许进入
 assign ds_allowin = !ds_valid || (ds_ready_go && es_allowin);
+//ID 阶段是否有一条准备好的有效指令可以交给 EXE
 assign ds_to_es_valid = ds_valid && ds_ready_go;
 
 always @(posedge clk) begin
@@ -36,7 +36,7 @@ always @(posedge clk) begin
     end else if (ds_allowin) begin
         ds_valid <= fs_to_ds_valid;
     end
-
+//当 IF 能传给 ID 阶段时，且 ID 阶段能接受的时候，ID 阶段就接收 IF→ID bus 的指令和 PC
     if (fs_to_ds_valid && ds_allowin) begin
         {ds_inst, ds_pc} <= fs_to_ds_bus;
     end
@@ -45,7 +45,6 @@ end
 // -----------------------------------------------------------------------------
 // 指令字段与译码
 // -----------------------------------------------------------------------------
-// 译码必须使用 ds_inst，而不是当前 IF 阶段刚取到的指令。
 wire [5:0] op_31_26 = ds_inst[31:26];
 wire [3:0] op_25_22 = ds_inst[25:22];
 wire [1:0] op_21_20 = ds_inst[21:20];
@@ -79,7 +78,7 @@ wire inst_srai_w;
 wire inst_addi_w;
 wire inst_ld_w;
 wire inst_st_w;
-// 本次增加的访存指令：b 取 1 字节，h 取 2 字节，bu/hu 读出后补零。
+// 本次增加的访存指令：b,h,跳转
 wire inst_ld_b;
 wire inst_ld_h;
 wire inst_ld_bu;
@@ -194,23 +193,23 @@ wire [11:0] alu_op;
 assign alu_op[0] = inst_add_w | inst_addi_w | inst_ld_w |
                    inst_st_w | inst_ld_b | inst_ld_h | inst_ld_bu |
                    inst_ld_hu | inst_st_b | inst_st_h |
-                   inst_jirl | inst_bl | inst_pcaddu12i;
-assign alu_op[1] = inst_sub_w;
-assign alu_op[2] = inst_slt | inst_slti;
-assign alu_op[3] = inst_sltu | inst_sltui;
-assign alu_op[4] = inst_and | inst_andi;
-assign alu_op[5] = inst_nor;
-assign alu_op[6] = inst_or | inst_ori;
-assign alu_op[7] = inst_xor | inst_xori;
-assign alu_op[8] = inst_slli_w | inst_sll_w;
-assign alu_op[9] = inst_srli_w | inst_srl_w;
-assign alu_op[10] = inst_srai_w | inst_sra_w;
-assign alu_op[11] = inst_lu12i_w;
+                   inst_jirl | inst_bl | inst_pcaddu12i; //加法
+assign alu_op[1] = inst_sub_w;//减法
+assign alu_op[2] = inst_slt | inst_slti;//有符号比较
+assign alu_op[3] = inst_sltu | inst_sltui;//无符号比较
+assign alu_op[4] = inst_and | inst_andi;//按位与
+assign alu_op[5] = inst_nor;//按位或非
+assign alu_op[6] = inst_or | inst_ori;//按位或
+assign alu_op[7] = inst_xor | inst_xori;//按位异或
+assign alu_op[8] = inst_slli_w | inst_sll_w;//逻辑左移
+assign alu_op[9] = inst_srli_w | inst_srl_w;//逻辑右移
+assign alu_op[10] = inst_srai_w | inst_sra_w;//算术右移
+assign alu_op[11] = inst_lu12i_w;//将 20 位立即数左移 12 位，然后写入目标寄存器
 
-// slti/sltui、andi/ori/xori 只换立即数或比较方式，ALU 运算本身可以复用。
+
 // pcaddu12i 要算 PC + 高位立即数，所以走加法，并把 ds_pc 当第一个操作数。
-wire need_si20 = inst_lu12i_w | inst_pcaddu12i;
-wire need_si26 = inst_b | inst_bl;
+wire need_si20 = inst_lu12i_w | inst_pcaddu12i;// 20 位立即数要符号扩展
+wire need_si26 = inst_b | inst_bl;//26 位立即数表示跳转偏移量
 wire src2_is_4 = inst_jirl | inst_bl;
 wire need_ui12 = inst_andi | inst_ori | inst_xori;
 // andi $r4,$r5,0xff 里的 0xff 要补成 0x000000ff；
@@ -222,13 +221,13 @@ wire [31:0] imm = src2_is_4 ? 32'd4 :
 wire [31:0] br_offs = need_si26 ? {{4{i26[25]}}, i26, 2'b0} :
                                   {{14{i16[15]}}, i16, 2'b0};
 wire [31:0] jirl_offs = {{14{i16[15]}}, i16, 2'b0};
-// store 的 rd 是要写入内存的数据，不是这条指令的目的寄存器。
+// store 的 rd 是要写入内存的数据的寄存器，不是这条指令的目的寄存器，因为 store 就是存数据到内存
 wire src_reg_is_rd = inst_beq | inst_bne | inst_blt | inst_bge |
                      inst_bltu | inst_bgeu | inst_st_w | inst_st_b | inst_st_h;
 
-// 当前指令是否真正需要读取第一个源寄存器 rj。
-// 例如 sll.w r6,r4,r5 会拿 r4 的值左移，r4 依赖前一条指令时也要前递或阻塞。
-// ld.b/st.h 也要读 rj 算地址，不能漏掉相关判断。
+// 当前指令是否真正需要读取第一个源寄存器 rj
+//  sll.w r6,r4,r5 会拿 r4 的值左移，r4 依赖前一条指令时也要前递或阻塞
+// ld.b/st.h 也要读 rj 算地址，不能漏掉相关判断
 wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_nor    | inst_and    | inst_or     | inst_xor  |
                inst_slli_w | inst_srli_w | inst_srai_w | inst_addi_w |
@@ -251,8 +250,9 @@ wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
                 inst_mulh_wu | inst_div_w | inst_mod_w | inst_div_wu |
                 inst_mod_wu;
 
-wire src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;
-// 访存地址用 rj + 符号扩展后的 i12；i12 可以是负偏移。
+wire src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;// 这些指令的第一个操作数是 PC
+
+// 访存地址用 rj + 符号扩展后的 i12；i12 可以是负偏移
 wire src2_is_imm = inst_slli_w | inst_srli_w | inst_srai_w |
                    inst_addi_w | inst_ld_w   | inst_st_w    |
                    inst_ld_b   | inst_ld_h   | inst_ld_bu   |
@@ -260,18 +260,21 @@ wire src2_is_imm = inst_slli_w | inst_srli_w | inst_srai_w |
                    inst_lu12i_w | inst_jirl | inst_bl      |
                    inst_slti   | inst_sltui | inst_andi    |
                    inst_ori    | inst_xori  | inst_pcaddu12i;
+ //load 相关指令， 这些指令的结果要从内存中读回，不能直接使用 ALU 的计算结果。
 wire res_from_mem = inst_ld_w | inst_ld_b | inst_ld_h |
                     inst_ld_bu | inst_ld_hu;
+
 // bl 要写链接地址到寄存器 1，不能和其他分支一起关闭写回，故删去 bl。
 wire gr_we = ~(inst_st_w | inst_st_b | inst_st_h |
                inst_beq | inst_bne | inst_blt |
                inst_bge | inst_bltu | inst_bgeu | inst_b);
 wire mem_we = inst_st_w | inst_st_b | inst_st_h;
-// 00: word，01: byte，10: half；后两级据此选字节使能或读回的数据。
+
+// 00: word，01: byte，10: half；后两级根据 men_size 选字节使能或读回的数据。
 // ld.bu/ld.hu 另带一个标志，提醒 WB 阶段补零而不是补符号位。
 wire [1:0] mem_size = (inst_ld_b | inst_ld_bu | inst_st_b) ? 2'd1 :
                       (inst_ld_h | inst_ld_hu | inst_st_h) ? 2'd2 : 2'd0;
-wire mem_unsigned = inst_ld_bu | inst_ld_hu;
+wire mem_unsigned = inst_ld_bu | inst_ld_hu;//无符号，扩展要补零
 // 把具体运算编号跟操作数一起送到 EXE，后续阶段只接收最终结果。
 wire [2:0] md_op = inst_mul_w   ? `MD_MUL_W   :
                    inst_mulh_w  ? `MD_MULH_W  :
@@ -343,6 +346,7 @@ wire rkd_match_ms = need_rkd && rf_raddr2 != 0 && ms_valid &&
 wire rkd_match_ws = need_rkd && rf_raddr2 != 0 && ws_valid &&
                     ws_gr_we && ws_dest != 0 && rf_raddr2 == ws_dest;
 
+//如果match到后续阶段的目的寄存器，且该阶段的结果不是从内存中读回的 不属于 load-use，就直接前递该阶段的结果；
 wire [31:0] rj_value =
     rj_match_es && !es_result_pending ? es_result :
     !rj_match_es && rj_match_ms && !ms_res_from_mem ? ms_result :
@@ -368,6 +372,7 @@ wire rkd_raw_conflict =
     (rkd_match_es && es_result_pending) ||
     (!rkd_match_es && rkd_match_ms && ms_res_from_mem);
 
+// 决定了 ds_ready_go 的值。只有当当前指令有效且没有 RAW 冲突时，ds_ready_go 才为 1。
 assign ds_ready_go = !(ds_valid && (rj_raw_conflict || rkd_raw_conflict));
 
 // 分支在 ID 阶段判断，操作数就是前递之后的值。
@@ -388,7 +393,8 @@ wire [31:0] br_target =
     ds_pc + br_offs : rj_value + jirl_offs;
 
 assign br_bus = {br_taken, br_target};
-// 宽度和扩展方式跟着指令一起走，不能到 MEM/WB 再看 ID 中的当前指令。
+// ds_to_es_bus：传给 EXE 阶段的总线
+// 其中包含了 ALU 操作码、源操作数、立即数、访存控制信号、目的寄存器号和当前 PC。
 assign ds_to_es_bus = {
     alu_op, src1_is_pc, src2_is_imm,
     rj_value, rkd_value, imm,

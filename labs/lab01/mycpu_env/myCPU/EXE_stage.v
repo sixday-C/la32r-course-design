@@ -112,5 +112,6 @@ assign es_fwd_bus = {
     es_valid, es_gr_we, (es_res_from_mem || (es_is_div && !div_done)),
     es_dest, es_result
 };
+//es_result_pending=es_res_from_mem || (es_is_div && !div_done); 当前指令是 load，或除法尚未算完时，该位为 1
 
 endmodule
