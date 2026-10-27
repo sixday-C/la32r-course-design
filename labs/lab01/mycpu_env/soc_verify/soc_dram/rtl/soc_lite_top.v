@@ -138,7 +138,7 @@ wire [31:0] conf_wdata;
 wire [31:0] conf_rdata;
 
 //cpu
-mycpu_top cpu(
+mycpu_sram_top cpu(
     .clk              (cpu_clk       ),
     .resetn           (cpu_resetn    ),  //low active
     .hw_int_in        (8'b0),
@@ -225,4 +225,3 @@ confreg #(.SIMULATION(SIMULATION)) u_confreg
 );
 
 endmodule
-

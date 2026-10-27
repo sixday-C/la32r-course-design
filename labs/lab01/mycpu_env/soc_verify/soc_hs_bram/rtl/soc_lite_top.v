@@ -156,7 +156,7 @@ wire [31:0] conf_rdata;
 wire [4 :0] ram_random_mask;
 
 //cpu
-mycpu_top cpu(
+mycpu_hs_top cpu(
     .clk              (cpu_clk   ),
     .resetn           (cpu_resetn),  //low active
 
@@ -329,4 +329,3 @@ confreg #(.SIMULATION(SIMULATION)) u_confreg
 );
 
 endmodule
-

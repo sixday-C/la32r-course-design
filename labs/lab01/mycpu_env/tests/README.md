@@ -1,0 +1,14 @@
+# AXI 接口验证
+
+`mycpu_top` 是课程 `soc_axi` 模板使用的 AXI 顶层；`mycpu_core` 使用取指、访存各一组 `req / addr_ok / data_ok` 信号；`mycpu_sram_top` 和 `mycpu_hs_top` 分别适配原同步 SRAM 与握手 SRAM 模板。原同步 SRAM 实验继续使用 `soc_bram` 测试入口。
+
+在仓库根目录运行：
+
+```sh
+iverilog -g2012 -s axi_cpu_tb -I labs/lab01/mycpu_env/myCPU \
+  -o /tmp/axi_cpu_tb labs/lab01/mycpu_env/myCPU/*.v \
+  labs/lab01/mycpu_env/tests/axi_cpu_tb.v
+vvp /tmp/axi_cpu_tb
+```
+
+测试模型会分别延迟读地址、读数据、写地址和写数据，检查整字读写、字节写、依赖指令以及分支错误路径。AXI 顶层目前发单拍读写事务；后续 Cache 接入时再使用整行突发事务。
