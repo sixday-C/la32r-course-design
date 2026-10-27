@@ -16,7 +16,12 @@ module MEM_stage(
     output wire [31:0]                 data_wdata,
     input  wire                        data_addr_ok,
     input  wire                        data_data_ok,
-    input  wire [31:0]                 data_rdata
+    input  wire [31:0]                 data_rdata,
+    output wire                        cache_cmd_req,
+    output wire [4:0]                  cache_cmd_code,
+    output wire [31:0]                 cache_cmd_addr,
+    input  wire                        cache_cmd_ready,
+    input  wire                        cache_cmd_done
 );
 
 reg ms_valid;
@@ -25,7 +30,9 @@ reg [`ES_TO_MS_BUS_WD-1:0] ms_bus_r;
 
 reg request_sent;
 wire ms_memory_op;
-wire ms_ready_go = !ms_memory_op || (request_sent && data_data_ok);
+wire ms_cache_op;
+wire ms_ready_go = ms_memory_op ? (request_sent && data_data_ok) :
+                   ms_cache_op ? (request_sent && cache_cmd_done) : 1'b1;
 assign ms_allowin = !ms_valid || (ms_ready_go && ws_allowin);
 assign ms_to_ws_valid = ms_valid && ms_ready_go;
 
@@ -42,7 +49,8 @@ always @(posedge clk) begin
 
     if (reset || flush || ms_allowin)
         request_sent <= 1'b0;
-    else if (data_req && data_addr_ok)
+    else if ((data_req && data_addr_ok) ||
+             (cache_cmd_req && cache_cmd_ready))
         request_sent <= 1'b1;
 end
 
@@ -63,14 +71,22 @@ wire [13:0] ms_csr_num;
 wire [31:0] ms_csr_wmask;
 wire [31:0] ms_csr_wvalue;
 wire [1:0] ms_cnt_op;
+wire ms_cacop;
+wire [4:0] ms_cacop_code;
 
 assign {
     ms_pc, ms_alu_result, ms_rkd_value,
     ms_res_from_mem, ms_gr_we, ms_mem_we,
     ms_mem_size, ms_mem_unsigned, ms_dest,
     ms_exc, ms_ertn, ms_csr_op, ms_csr_num,
-    ms_csr_wmask, ms_csr_wvalue, ms_cnt_op
+    ms_csr_wmask, ms_csr_wvalue, ms_cnt_op,
+    ms_cacop, ms_cacop_code
 } = ms_bus_r;
+
+assign ms_cache_op = ms_valid && ms_cacop && !(|ms_exc);
+assign cache_cmd_req = ms_cache_op && !request_sent && !flush;
+assign cache_cmd_code = ms_cacop_code;
+assign cache_cmd_addr = ms_alu_result;
 
 // 同一个 RAM 端口处理 word、byte 和 half。地址低两位决定落在哪个字节。
 assign ms_memory_op = ms_valid && !(|ms_exc) &&
@@ -95,7 +111,8 @@ assign ms_to_ws_bus = {
     ms_pc, ms_alu_result, ms_res_from_mem, ms_gr_we,
     ms_mem_size, ms_mem_unsigned, ms_dest,
     ms_exc, ms_ertn, ms_csr_op, ms_csr_num,
-    ms_csr_wmask, ms_csr_wvalue, ms_cnt_op, data_rdata
+    ms_csr_wmask, ms_csr_wvalue, ms_cnt_op, data_rdata,
+    ms_cacop && ms_cacop_code[2:0] == 3'd0
 };
 assign ms_fwd_bus = {
     ms_valid, ms_gr_we, ms_csr_op[1],

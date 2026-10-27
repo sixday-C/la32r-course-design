@@ -11,12 +11,14 @@ iverilog -g2012 -s axi_cpu_tb -I labs/lab01/mycpu_env/myCPU \
 vvp /tmp/axi_cpu_tb
 ```
 
-测试模型会分别延迟读地址、读数据、写地址和写数据，检查整字与字节访问、依赖指令、分支错误路径、D-Cache 脏行写回以及 `0xbfaf_f020` 外设地址的绕过访问。I-Cache 和 D-Cache 缺失时发 4 拍突发读取；D-Cache 写回也使用 4 拍突发写入。
+测试模型会分别延迟读地址、读数据、写地址和写数据，检查整字与字节访问、依赖指令、分支错误路径、D-Cache 脏行写回、`cacop` 的索引/命中写回，以及 `0xbfaf_f020` 外设地址的绕过访问。I-Cache 和 D-Cache 缺失时发 4 拍突发读取；D-Cache 写回也使用 4 拍突发写入。
 
-单独检查 I-Cache 命中和同索引替换：
+单独检查 I-Cache 命中、同索引替换和三种维护操作：
 
 ```sh
 iverilog -g2012 -s icache_tb -o /tmp/icache_tb \
   labs/lab01/mycpu_env/myCPU/icache.v labs/lab01/mycpu_env/tests/icache_tb.v
 vvp /tmp/icache_tb
 ```
+
+`cacop` 按参考手册实现 code[4:3] 为 0（Store Tag）、1（索引无效/写回）、2（命中无效/写回），对象 code[2:0] 为 0（I-Cache）或 1（D-Cache）。当前 CPU 没有地址翻译/TLB，课程 n73–n78 中涉及 DMW/TLB 的部分不能作为本阶段的完整验收。

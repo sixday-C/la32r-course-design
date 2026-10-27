@@ -124,6 +124,7 @@ wire inst_ine;
 wire inst_rdcntvl;
 wire inst_rdcntvh;
 wire inst_rdcntid;
+wire inst_cacop;
 
 assign inst_add_w = op_31_26_d[6'h00] & op_25_22_d[4'h0]
                   & op_21_20_d[2'h1] & op_19_15_d[5'h00];
@@ -211,6 +212,8 @@ assign inst_break = op_31_26_d[6'h00] & op_25_22_d[4'h0]
 assign inst_rdcntvl = ds_inst[31:10] == 22'h18 && rj == 5'd0;
 assign inst_rdcntvh = ds_inst[31:10] == 22'h19 && rj == 5'd0;
 assign inst_rdcntid = ds_inst[31:10] == 22'h18 && rd == 5'd0 && rj != 5'd0;
+// CACOP 的 rd 字段存放 5 位操作码，不是目的寄存器。
+assign inst_cacop = op_31_26_d[6'h01] & op_25_22_d[4'h8];
 wire inst_known = inst_add_w | inst_sub_w | inst_slt | inst_sltu |
     inst_nor | inst_and | inst_or | inst_xor | inst_slli_w | inst_srli_w |
     inst_srai_w | inst_addi_w | inst_ld_w | inst_st_w | inst_ld_b |
@@ -222,7 +225,7 @@ wire inst_known = inst_add_w | inst_sub_w | inst_slt | inst_sltu |
     inst_mul_w | inst_mulh_w | inst_mulh_wu | inst_div_w | inst_mod_w |
     inst_div_wu | inst_mod_wu | inst_csrrd | inst_csrwr | inst_csrxchg |
     inst_ertn | inst_syscall | inst_break | inst_rdcntvl |
-    inst_rdcntvh | inst_rdcntid;
+    inst_rdcntvh | inst_rdcntid | inst_cacop;
 assign inst_ine = !inst_known;
 
 // -----------------------------------------------------------------------------
@@ -233,7 +236,7 @@ wire [11:0] alu_op;
 assign alu_op[0] = inst_add_w | inst_addi_w | inst_ld_w |
                    inst_st_w | inst_ld_b | inst_ld_h | inst_ld_bu |
                    inst_ld_hu | inst_st_b | inst_st_h |
-                   inst_jirl | inst_bl | inst_pcaddu12i; //加法
+                   inst_jirl | inst_bl | inst_pcaddu12i | inst_cacop; //加法
 assign alu_op[1] = inst_sub_w;//减法
 assign alu_op[2] = inst_slt | inst_slti;//有符号比较
 assign alu_op[3] = inst_sltu | inst_sltui;//无符号比较
@@ -280,7 +283,7 @@ wire need_rj = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu |
                inst_sra_w  | inst_blt    | inst_bge    | inst_bltu |
                inst_bgeu   | inst_mul_w  | inst_mulh_w | inst_mulh_wu |
                inst_div_w  | inst_mod_w  | inst_div_wu | inst_mod_wu |
-               inst_csrxchg;
+               inst_csrxchg | inst_cacop;
 
 // 当前指令是否真正需要读取第二个源寄存器。store 要读 rd 中待写入的数据。
 wire need_rkd = inst_add_w | inst_sub_w | inst_slt  | inst_sltu |
@@ -301,7 +304,7 @@ wire src2_is_imm = inst_slli_w | inst_srli_w | inst_srai_w |
                    inst_ld_hu  | inst_st_b   | inst_st_h    |
                    inst_lu12i_w | inst_jirl | inst_bl      |
                    inst_slti   | inst_sltui | inst_andi    |
-                   inst_ori    | inst_xori  | inst_pcaddu12i;
+                   inst_ori    | inst_xori  | inst_pcaddu12i | inst_cacop;
  //load 相关指令， 这些指令的结果要从内存中读回，不能直接使用 ALU 的计算结果。
 wire res_from_mem = inst_ld_w | inst_ld_b | inst_ld_h |
                     inst_ld_bu | inst_ld_hu;
@@ -310,7 +313,7 @@ wire res_from_mem = inst_ld_w | inst_ld_b | inst_ld_h |
 wire gr_we = ~(inst_st_w | inst_st_b | inst_st_h |
                inst_beq | inst_bne | inst_blt |
                inst_bge | inst_bltu | inst_bgeu | inst_b |
-               inst_syscall | inst_break | inst_ertn);
+               inst_syscall | inst_break | inst_ertn | inst_cacop);
 wire mem_we = inst_st_w | inst_st_b | inst_st_h;
 
 // 00: word，01: byte，10: half；后两级根据 men_size 选字节使能或读回的数据。
@@ -460,7 +463,8 @@ assign ds_to_es_bus = {
     rj_value, rkd_value, imm,
     res_from_mem, gr_we, mem_we, mem_size, mem_unsigned,
     md_op, dest, ds_pc,
-    ds_exc, inst_ertn, csr_op, ds_inst[23:10], cnt_op
+    ds_exc, inst_ertn, csr_op, ds_inst[23:10], cnt_op,
+    inst_cacop, rd
 };
 
 endmodule

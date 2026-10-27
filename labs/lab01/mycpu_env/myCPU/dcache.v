@@ -22,7 +22,12 @@ module dcache(
     output wire [127:0] wr_data,
     output wire [15:0]  wr_strb,
     input  wire         wr_ready,
-    input  wire         wr_done
+    input  wire         wr_done,
+    input  wire         maint_req,
+    input  wire [31:0]  maint_addr,
+    input  wire [1:0]   maint_code,
+    output wire         maint_ready,
+    output wire         maint_done
 );
 localparam IDLE       = 4'd0;
 localparam LOOKUP     = 4'd1;
@@ -40,6 +45,9 @@ reg [3:0] state;
 reg [31:0] saved_addr;
 reg [31:0] saved_wdata;
 reg [3:0] saved_we;
+reg maintenance;
+reg [1:0] saved_maint_code;
+reg invalidate_after_wb;
 reg [31:0] saved_rdata;
 reg [1:0] beat;
 reg [127:0] refill_line;
@@ -71,8 +79,10 @@ function [127:0] merge_store;
     end
 endfunction
 
-assign addr_ok = state == IDLE;
-assign data_ok = state == RESP;
+assign addr_ok = state == IDLE && !maint_req;
+assign data_ok = state == RESP && !maintenance;
+assign maint_ready = state == IDLE;
+assign maint_done = state == RESP && maintenance;
 assign rdata = saved_rdata;
 assign rd_req = state == REFILL_REQ || state == BYPASS_RD;
 assign rd_addr = state == BYPASS_RD ? saved_addr :
@@ -92,6 +102,9 @@ always @(posedge clk) begin
         saved_addr <= 32'b0;
         saved_wdata <= 32'b0;
         saved_we <= 4'b0;
+        maintenance <= 1'b0;
+        saved_maint_code <= 2'b0;
+        invalidate_after_wb <= 1'b0;
         saved_rdata <= 32'b0;
         beat <= 2'b0;
         refill_line <= 128'b0;
@@ -101,14 +114,39 @@ always @(posedge clk) begin
             line_tag[i] <= 22'b0;
     end else begin
         case (state)
-            IDLE: if (req) begin
+            IDLE: if (maint_req) begin
+                saved_addr <= maint_addr;
+                saved_maint_code <= maint_code;
+                maintenance <= 1'b1;
+                state <= LOOKUP;
+            end else if (req) begin
                 saved_addr <= addr;
                 saved_we <= we;
                 saved_wdata <= wdata;
+                maintenance <= 1'b0;
                 state <= LOOKUP;
             end
             LOOKUP: begin
-                if (bypass) begin
+                if (maintenance) begin
+                    // 0: Store Tag；1: 索引无效并写回；2: 命中无效并写回。
+                    if (saved_maint_code == 0) begin
+                        line_tag[index] <= 22'b0;
+                        line_valid[index] <= 1'b0;
+                        line_dirty[index] <= 1'b0;
+                        state <= RESP;
+                    end else if ((saved_maint_code == 1 && line_valid[index]) ||
+                                 (saved_maint_code == 2 && hit)) begin
+                        if (line_dirty[index]) begin
+                            invalidate_after_wb <= 1'b1;
+                            state <= WB_REQ;
+                        end else begin
+                            line_valid[index] <= 1'b0;
+                            state <= RESP;
+                        end
+                    end else begin
+                        state <= RESP;
+                    end
+                end else if (bypass) begin
                     state <= (|saved_we) ? BYPASS_WR : BYPASS_RD;
                 end else if (hit) begin
                     if (|saved_we) begin
@@ -120,6 +158,7 @@ always @(posedge clk) begin
                     end
                     state <= RESP;
                 end else if (line_valid[index] && line_dirty[index]) begin
+                    invalidate_after_wb <= 1'b0;
                     state <= WB_REQ;
                 end else begin
                     state <= REFILL_REQ;
@@ -128,7 +167,12 @@ always @(posedge clk) begin
             WB_REQ: if (wr_ready) state <= WB_WAIT;
             WB_WAIT: if (wr_done) begin
                 line_dirty[index] <= 1'b0;
-                state <= REFILL_REQ;
+                if (invalidate_after_wb) begin
+                    line_valid[index] <= 1'b0;
+                    state <= RESP;
+                end else begin
+                    state <= REFILL_REQ;
+                end
             end
             REFILL_REQ: if (rd_ready) begin
                 beat <= 2'b0;

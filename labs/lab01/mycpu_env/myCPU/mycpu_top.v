@@ -69,6 +69,26 @@ wire [127:0] dc_wr_data;
 wire [15:0] dc_wr_strb;
 wire dc_wr_ready;
 wire dc_wr_done;
+wire cache_cmd_req;
+wire [4:0] cache_cmd_code;
+wire [31:0] cache_cmd_addr;
+wire cache_cmd_ready;
+wire cache_cmd_done;
+wire ic_maint_ready;
+wire ic_maint_done;
+wire dc_maint_ready;
+wire dc_maint_done;
+wire ic_maint_req = cache_cmd_req && cache_cmd_code[2:0] == 3'd0;
+wire dc_maint_req = cache_cmd_req && cache_cmd_code[2:0] == 3'd1;
+reg unsupported_done;
+assign cache_cmd_ready = ic_maint_req ? ic_maint_ready :
+                         dc_maint_req ? dc_maint_ready : 1'b1;
+assign cache_cmd_done = ic_maint_done || dc_maint_done || unsupported_done;
+always @(posedge aclk) begin
+    if (!aresetn) unsupported_done <= 1'b0;
+    else unsupported_done <= cache_cmd_req &&
+         cache_cmd_code[2:0] != 3'd0 && cache_cmd_code[2:0] != 3'd1;
+end
 
 mycpu_core u_core(
     .clk(aclk), .resetn(aresetn), .hw_int_in(8'b0),
@@ -79,6 +99,9 @@ mycpu_core u_core(
     .data_addr(data_addr), .data_wdata(data_wdata),
     .data_addr_ok(data_addr_ok), .data_data_ok(data_data_ok),
     .data_rdata(data_rdata),
+    .cache_cmd_req(cache_cmd_req), .cache_cmd_code(cache_cmd_code),
+    .cache_cmd_addr(cache_cmd_addr),
+    .cache_cmd_ready(cache_cmd_ready), .cache_cmd_done(cache_cmd_done),
     .debug_wb_pc(debug_wb_pc), .debug_wb_rf_we(debug_wb_rf_we),
     .debug_wb_rf_wnum(debug_wb_rf_wnum),
     .debug_wb_rf_wdata(debug_wb_rf_wdata)
@@ -91,7 +114,10 @@ icache u_icache(
     .rd_req(ic_rd_req), .rd_addr(ic_rd_addr),
     .rd_ready(ic_rd_ready),
     .ret_valid(rvalid && rready && rid == 4'd0),
-    .ret_last(rlast), .ret_data(rdata)
+    .ret_last(rlast), .ret_data(rdata),
+    .maint_req(ic_maint_req), .maint_addr(cache_cmd_addr),
+    .maint_code(cache_cmd_code[4:3]),
+    .maint_ready(ic_maint_ready), .maint_done(ic_maint_done)
 );
 
 dcache u_dcache(
@@ -104,7 +130,10 @@ dcache u_dcache(
     .ret_last(rlast), .ret_data(rdata),
     .wr_req(dc_wr_req), .wr_addr(dc_wr_addr), .wr_len(dc_wr_len),
     .wr_data(dc_wr_data), .wr_strb(dc_wr_strb),
-    .wr_ready(dc_wr_ready), .wr_done(dc_wr_done)
+    .wr_ready(dc_wr_ready), .wr_done(dc_wr_done),
+    .maint_req(dc_maint_req), .maint_addr(cache_cmd_addr),
+    .maint_code(cache_cmd_code[4:3]),
+    .maint_ready(dc_maint_ready), .maint_done(dc_maint_done)
 );
 
 // 数据读优先；I-Cache 缺失时请求一整行（4 个 32 位 beat）。

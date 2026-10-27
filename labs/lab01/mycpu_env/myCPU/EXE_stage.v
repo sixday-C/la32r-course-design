@@ -52,13 +52,16 @@ wire es_ertn;
 wire [1:0] es_csr_op;
 wire [13:0] es_csr_num;
 wire [1:0] es_cnt_op;
+wire es_cacop;
+wire [4:0] es_cacop_code;
 
 assign {
     es_alu_op, es_src1_is_pc, es_src2_is_imm,
     es_rj_value, es_rkd_value, es_imm,
     es_res_from_mem, es_gr_we, es_mem_we,
     es_mem_size, es_mem_unsigned, es_md_op, es_dest, es_pc,
-    es_exc, es_ertn, es_csr_op, es_csr_num, es_cnt_op
+    es_exc, es_ertn, es_csr_op, es_csr_num, es_cnt_op,
+    es_cacop, es_cacop_code
 } = es_bus_r;
 
 wire [31:0] alu_result;
@@ -122,7 +125,7 @@ assign es_to_ms_bus = {
     es_mem_size, es_mem_unsigned, es_dest,
     es_exc_out, es_ertn, es_csr_op, es_csr_num,
     (es_csr_op == `CSR_WR ? 32'hffffffff : es_rj_value),
-    es_rkd_value, es_cnt_op
+    es_rkd_value, es_cnt_op, es_cacop, es_cacop_code
 };
 assign es_fwd_bus = {
     es_valid, es_gr_we, es_csr_op[1],

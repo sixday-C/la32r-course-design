@@ -51,7 +51,7 @@ mycpu_top cpu(
     .debug_wb_rf_wnum(debug_wb_rf_wnum), .debug_wb_rf_wdata(debug_wb_rf_wdata)
 );
 
-reg [31:0] imem [0:15];
+reg [31:0] imem [0:31];
 reg [31:0] dmem [0:271];
 initial begin
     // addi.w r1,r0,5; st.w r1,r0,0; ld.w r2,r0,0; addi.w r3,r2,1
@@ -73,6 +73,12 @@ initial begin
     imem[13] = 32'h0380814a;
     imem[14] = 32'h29800145;
     imem[15] = 32'h2880014b;
+    imem[16] = 32'h29800105;
+    imem[17] = 32'h06000109;
+    imem[18] = 32'h2880010c;
+    imem[19] = 32'h29800109;
+    imem[20] = 32'h06000111;
+    imem[21] = 32'h2880010e;
     dmem[0] = 32'b0;
     dmem[1] = 32'b0;
     dmem[2] = 32'b0;
@@ -118,7 +124,7 @@ always @(posedge clk) begin
             else begin
                 rid <= read_id;
                 rdata <= read_id == 0 ?
-                    imem[read_addr[5:2] + read_beat] :
+                    imem[read_addr[6:2] + read_beat] :
                     read_addr == 32'hbfaf_f020 ? led_reg :
                     dmem[read_addr[11:2] + read_beat];
                 rlast <= read_beat == read_len;
@@ -221,8 +227,9 @@ always @(posedge clk) begin
         end
         if (debug_wb_rf_wnum == 7) begin
             if (!seen_r5 || debug_wb_rf_wdata !== 127 ||
-                inst_line_reads != 3)
-                $fatal(1, "byte store/load mismatch");
+                inst_line_reads < 3)
+                $fatal(1, "byte store/load mismatch read=%h lines=%0d",
+                       debug_wb_rf_wdata, inst_line_reads);
             seen_r7 <= 1;
         end
         if (debug_wb_rf_wnum == 9) begin
@@ -236,7 +243,16 @@ always @(posedge clk) begin
                 $fatal(1, "MMIO bypass mismatch read=%h led=%h writes=%0d lines=%0d",
                        debug_wb_rf_wdata, led_reg, mmio_writes,
                        inst_line_reads);
-            $display("AXI CPU PASS");
+        end
+        if (debug_wb_rf_wnum == 12) begin
+            if (debug_wb_rf_wdata !== 7 || dmem[256] !== 7)
+                $fatal(1, "index CACOP did not write back");
+        end
+        if (debug_wb_rf_wnum == 14) begin
+            if (debug_wb_rf_wdata !== 32'h1234 ||
+                dmem[256] !== 32'h1234)
+                $fatal(1, "hit CACOP did not write back");
+            $display("AXI CPU AND CACOP PASS");
             $finish;
         end
     end

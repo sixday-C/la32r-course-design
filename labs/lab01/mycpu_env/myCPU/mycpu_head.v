@@ -3,9 +3,9 @@
 `define BR_BUS_WD          33
 `define FS_TO_DS_BUS_WD    65
 // ID→EX 另外带 3 位乘除操作编号；访存宽度和扩展方式占 3 位。
-`define DS_TO_ES_BUS_WD   181
-`define ES_TO_MS_BUS_WD   196
-`define MS_TO_WS_BUS_WD   195
+`define DS_TO_ES_BUS_WD   187
+`define ES_TO_MS_BUS_WD   202
+`define MS_TO_WS_BUS_WD   196
 `define WS_TO_RF_BUS_WD    38
 `define ES_FWD_BUS_WD      41
 `define MS_FWD_BUS_WD      41

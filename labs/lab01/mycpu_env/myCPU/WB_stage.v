@@ -16,6 +16,7 @@ module WB_stage(
     output wire [31:0]                 csr_wmask,
     output wire [31:0]                 csr_wvalue,
     output wire                        wb_flush,
+    output wire                        wb_cache_flush,
     output wire                        wb_ex,
     output wire                        wb_ertn,
     output wire [5:0]                  wb_ecode,
@@ -62,17 +63,20 @@ wire [31:0] ws_csr_wmask;
 wire [31:0] ws_csr_wvalue;
 wire [1:0] ws_cnt_op;
 wire [31:0] ws_mem_rdata;
+wire ws_icacop;
 
 assign {
     ws_pc, ws_alu_result, ws_res_from_mem, ws_gr_we,
     ws_mem_size, ws_mem_unsigned, ws_dest,
     ws_exc, ws_ertn, ws_csr_op, ws_csr_num,
-    ws_csr_wmask, ws_csr_wvalue, ws_cnt_op, ws_mem_rdata
+    ws_csr_wmask, ws_csr_wvalue, ws_cnt_op, ws_mem_rdata,
+    ws_icacop
 } = ws_bus_r;
 
 assign wb_ex = ws_valid && |ws_exc;
 assign wb_ertn = ws_valid && ws_ertn && !wb_ex;
-assign wb_flush = wb_ex || wb_ertn;
+assign wb_cache_flush = ws_valid && ws_icacop && !wb_ex && !wb_ertn;
+assign wb_flush = wb_ex || wb_ertn || wb_cache_flush;
 assign wb_ecode = ws_exc[`EXC_INT]  ? 6'h00 :
                   ws_exc[`EXC_ADEF] ? 6'h08 :
                   ws_exc[`EXC_ALE]  ? 6'h09 :

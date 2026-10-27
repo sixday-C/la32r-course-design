@@ -20,14 +20,18 @@ module mycpu_sram_top(
 );
 reg inst_done;
 reg data_done;
+reg cache_done;
+wire cache_req;
 always @(posedge clk) begin
     if (!resetn) begin
         inst_done <= 1'b0;
         data_done <= 1'b0;
+        cache_done <= 1'b0;
     end else begin
         // RAM 在请求时钟沿读出数据，下一拍向 CPU 报告完成。
         inst_done <= inst_sram_en;
         data_done <= data_sram_en;
+        cache_done <= cache_req;
     end
 end
 assign inst_sram_we = 4'b0;
@@ -41,6 +45,8 @@ mycpu_core u_core(
     .data_addr(data_sram_addr), .data_wdata(data_sram_wdata),
     .data_addr_ok(1'b1), .data_data_ok(data_done),
     .data_rdata(data_sram_rdata),
+    .cache_cmd_req(cache_req), .cache_cmd_code(), .cache_cmd_addr(),
+    .cache_cmd_ready(1'b1), .cache_cmd_done(cache_done),
     .debug_wb_pc(debug_wb_pc), .debug_wb_rf_we(debug_wb_rf_we),
     .debug_wb_rf_wnum(debug_wb_rf_wnum),
     .debug_wb_rf_wdata(debug_wb_rf_wdata)

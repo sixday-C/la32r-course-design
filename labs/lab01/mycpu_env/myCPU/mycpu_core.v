@@ -18,6 +18,12 @@ module mycpu_core(
     input  wire        data_data_ok,
     input  wire [31:0] data_rdata,
 
+    output wire        cache_cmd_req,
+    output wire [4:0]  cache_cmd_code,
+    output wire [31:0] cache_cmd_addr,
+    input  wire        cache_cmd_ready,
+    input  wire        cache_cmd_done,
+
     // trace debug interface
     output wire [31:0] debug_wb_pc,
     output wire [3:0]  debug_wb_rf_we,
@@ -52,6 +58,7 @@ wire [`WS_FWD_BUS_WD-1:0]   ws_fwd_bus;
 wire wb_flush;
 wire wb_ex;
 wire wb_ertn;
+wire wb_cache_flush;
 wire [5:0] wb_ecode;
 wire [8:0] wb_esubcode;
 wire [31:0] wb_badv;
@@ -72,7 +79,8 @@ IF_stage u_if (
     .clk             (clk),
     .reset           (reset),
     .flush           (wb_flush),
-    .flush_pc        (wb_ex ? ex_entry : ertn_entry),
+    .flush_pc        (wb_ex ? ex_entry :
+                      wb_ertn ? ertn_entry : debug_wb_pc + 32'd4),
     .ds_allowin      (ds_allowin),
     .br_bus          (br_bus),
     .fs_to_ds_valid  (fs_to_ds_valid),
@@ -132,7 +140,12 @@ MEM_stage u_mem (
     .data_wdata      (data_wdata),
     .data_addr_ok    (data_addr_ok),
     .data_data_ok    (data_data_ok),
-    .data_rdata      (data_rdata)
+    .data_rdata      (data_rdata),
+    .cache_cmd_req   (cache_cmd_req),
+    .cache_cmd_code  (cache_cmd_code),
+    .cache_cmd_addr  (cache_cmd_addr),
+    .cache_cmd_ready (cache_cmd_ready),
+    .cache_cmd_done  (cache_cmd_done)
 );
 
 WB_stage u_wb (
@@ -152,6 +165,7 @@ WB_stage u_wb (
     .csr_wmask        (csr_wmask),
     .csr_wvalue       (csr_wvalue),
     .wb_flush         (wb_flush),
+    .wb_cache_flush   (wb_cache_flush),
     .wb_ex            (wb_ex),
     .wb_ertn          (wb_ertn),
     .wb_ecode         (wb_ecode),
