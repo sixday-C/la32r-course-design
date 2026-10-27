@@ -51,11 +51,12 @@ if "--resume-frames" not in sys.argv:
                         "--chipdb", str(TOOLS / "chipdb/xc7a200tfbg676.bin"),
                         "--json", str(BUILD / "soc.json"),
                         "--xdc", str(BUILD / "remote.xdc"),
-                        "--freq", "25", "--fasm", str(BUILD / "remote.fasm"),
+                        "--freq", "25", "--placer", "heap", "--seed", "2",
+                        "--fasm", str(BUILD / "remote.fasm"),
                         "--report", str(BUILD / "timing.json")])
 database = TOOLS / "openxc7/share/nextpnr/external/prjxray-db/artix7"
 part = "xc7a200tfbg676-1"
-bitstream = OUT / "peripheral_demo_25MHz.bit"
+bitstream = OUT / "uart_echo_25MHz.bit"
 with tempfile.TemporaryDirectory(prefix="mycpu-openxc7-") as temporary:
     ascii_path = Path(temporary)
     (ascii_path / "remote.fasm").symlink_to(BUILD / "remote.fasm")
