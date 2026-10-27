@@ -1,7 +1,7 @@
 `ifndef MYCPU_HEAD_V
 `define MYCPU_HEAD_V
-`define BR_BUS_WD          33
-`define FS_TO_DS_BUS_WD    65
+`define BR_BUS_WD          67
+`define FS_TO_DS_BUS_WD    97
 // ID→EX 另外带 3 位乘除操作编号；访存宽度和扩展方式占 3 位。
 `define DS_TO_ES_BUS_WD   187
 `define ES_TO_MS_BUS_WD   202

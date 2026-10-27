@@ -23,8 +23,10 @@ reg ds_valid;
 reg [31:0] ds_pc;
 reg [31:0] ds_inst;
 reg ds_adef;
+reg [31:0] ds_pred_next;
 wire ds_ready_go;
 wire br_taken;
+wire br_redirect;
 
 //ID 阶段允许被进入的条件是，ID 阶段没有处理的工作 或者 ID 阶段处理完了且 EXE 阶段允许进入
 assign ds_allowin = !ds_valid || (ds_ready_go && es_allowin);
@@ -34,14 +36,14 @@ assign ds_to_es_valid = ds_valid && ds_ready_go;
 always @(posedge clk) begin
     if (reset || flush) begin
         ds_valid <= 1'b0;
-    end else if (br_taken) begin
+    end else if (br_redirect) begin
         ds_valid <= 1'b0;
     end else if (ds_allowin) begin
         ds_valid <= fs_to_ds_valid;
     end
 //当 IF 能传给 ID 阶段时，且 ID 阶段能接受的时候，ID 阶段就接收 IF→ID bus 的指令和 PC
     if (fs_to_ds_valid && ds_allowin) begin
-        {ds_adef, ds_inst, ds_pc} <= fs_to_ds_bus;
+        {ds_adef, ds_inst, ds_pc, ds_pred_next} <= fs_to_ds_bus;
     end
 end
 
@@ -439,15 +441,17 @@ assign ds_ready_go = !(ds_valid &&
 
 // 分支在 ID 阶段判断，操作数就是前递之后的值。
 // 如果 EXE 还在做除法，先留在 ID，等 EXE 能接收时再通知 IF 跳转。
-assign br_taken =
+wire branch_condition =
     ((inst_beq && rj_value == rkd_value) ||
      (inst_bne && rj_value != rkd_value) ||
      (inst_blt && $signed(rj_value) < $signed(rkd_value)) || // 有符号比较
      (inst_bge && $signed(rj_value) >= $signed(rkd_value)) || // 有符号比较
      (inst_bltu && rj_value < rkd_value) || // 无符号比较
      (inst_bgeu && rj_value >= rkd_value) ||  //无符号比较
-     inst_jirl || inst_bl || inst_b) && ds_valid && ds_ready_go &&
-     es_allowin && !(|ds_exc) && !flush;
+     inst_jirl || inst_bl || inst_b);
+wire branch_resolved = ds_valid && ds_ready_go && es_allowin &&
+                       !(|ds_exc) && !flush;
+assign br_taken = branch_condition && branch_resolved;
 
 // 相对分支以 ds_pc 为基址；jirl 以 rj_value 为基址。
 wire [31:0] br_target =
@@ -455,7 +459,10 @@ wire [31:0] br_target =
      inst_bltu || inst_bgeu || inst_bl || inst_b) ?
     ds_pc + br_offs : rj_value + jirl_offs;
 
-assign br_bus = {br_taken, br_target};
+wire [31:0] actual_next = br_taken ? br_target : ds_pc + 32'd4;
+assign br_redirect = branch_resolved && ds_pred_next != actual_next;
+assign br_bus = {branch_resolved, br_taken,
+                 br_redirect, ds_pc, actual_next};
 // ds_to_es_bus：传给 EXE 阶段的总线
 // 其中包含了 ALU 操作码、源操作数、立即数、访存控制信号、目的寄存器号和当前 PC。
 assign ds_to_es_bus = {

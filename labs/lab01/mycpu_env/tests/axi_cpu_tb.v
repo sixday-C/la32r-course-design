@@ -81,6 +81,10 @@ initial begin
     imem[21] = 32'h2880010e;
     imem[22] = 32'h0290010d;
     imem[23] = 32'h288001af;
+    imem[24] = 32'h02800c10;
+    imem[25] = 32'h02bffe10;
+    imem[26] = 32'h5ffffe00;
+    imem[27] = 32'h02802411;
     dmem[0] = 32'b0;
     dmem[1] = 32'b0;
     dmem[2] = 32'b0;
@@ -208,6 +212,17 @@ reg seen_r2 = 0;
 reg seen_r3 = 0;
 reg seen_r5 = 0;
 reg seen_r7 = 0;
+integer branch_redirects = 0;
+integer predicted_branches = 0;
+always @(posedge clk) begin
+    if (resetn && cpu.u_core.u_id.br_redirect &&
+        cpu.u_core.u_id.ds_pc == 32'h1c000068)
+        branch_redirects <= branch_redirects + 1;
+    if (resetn && cpu.u_core.inst_req && cpu.u_core.inst_addr_ok &&
+        cpu.u_core.inst_addr == 32'h1c000068 &&
+        cpu.u_core.u_if.predict_hit)
+        predicted_branches <= predicted_branches + 1;
+end
 always @(posedge clk) begin
     if (resetn && |debug_wb_rf_we) begin
         if (debug_wb_rf_wnum == 1) begin
@@ -264,7 +279,13 @@ always @(posedge clk) begin
             if (debug_wb_rf_wdata !== 32'habc ||
                 dmem[0] !== 32'h00007f05)
                 $fatal(1, "two-way dirty replacement mismatch");
-            $display("AXI CPU AND CACOP PASS (ways=%0d)", WAYS);
+        end
+        if (debug_wb_rf_wnum == 17) begin
+            if (debug_wb_rf_wdata !== 9 ||
+                branch_redirects != 2 || predicted_branches < 1)
+                $fatal(1, "branch prediction mismatch: redirects=%0d predicted=%0d",
+                       branch_redirects, predicted_branches);
+            $display("AXI CPU, CACHE AND PREDICTOR PASS (ways=%0d)", WAYS);
             $finish;
         end
     end
