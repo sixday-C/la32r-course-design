@@ -1,5 +1,5 @@
 // AXI 顶层。读 ID 0 给取指，读 ID 1 给访存；CPU 每个端口最多一笔未完成请求。
-module mycpu_top(
+module mycpu_top #(parameter CACHE_WAYS = 2)(
     input  wire        aclk,
     input  wire        aresetn,
     output wire [3:0]  arid,
@@ -107,7 +107,7 @@ mycpu_core u_core(
     .debug_wb_rf_wdata(debug_wb_rf_wdata)
 );
 
-icache u_icache(
+icache #(.WAYS(CACHE_WAYS)) u_icache(
     .clk(aclk), .resetn(aresetn),
     .req(inst_req), .addr(inst_addr),
     .addr_ok(inst_addr_ok), .data_ok(inst_data_ok), .rdata(inst_rdata),
@@ -120,7 +120,7 @@ icache u_icache(
     .maint_ready(ic_maint_ready), .maint_done(ic_maint_done)
 );
 
-dcache u_dcache(
+dcache #(.WAYS(CACHE_WAYS)) u_dcache(
     .clk(aclk), .resetn(aresetn),
     .req(data_req), .we(data_we), .addr(data_addr), .wdata(data_wdata),
     .addr_ok(data_addr_ok), .data_ok(data_data_ok), .rdata(data_rdata),

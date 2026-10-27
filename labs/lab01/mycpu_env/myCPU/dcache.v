@@ -1,5 +1,5 @@
 // 64 行、每行 16 字节的直接映射数据 Cache；写回、写分配。
-module dcache(
+module dcache #(parameter WAYS = 2)(
     input  wire         clk,
     input  wire         resetn,
     input  wire         req,
@@ -48,19 +48,35 @@ reg [3:0] saved_we;
 reg maintenance;
 reg [1:0] saved_maint_code;
 reg invalidate_after_wb;
+reg selected_way;
 reg [31:0] saved_rdata;
 reg [1:0] beat;
 reg [127:0] refill_line;
-reg [127:0] line_data [0:63];
-reg [21:0] line_tag [0:63];
-reg [63:0] line_valid;
-reg [63:0] line_dirty;
+reg [127:0] line_data [0:127];
+reg [21:0] line_tag [0:127];
+reg [127:0] line_valid;
+reg [127:0] line_dirty;
+reg [63:0] replacement_way;
 integer i;
 
 wire [5:0] index = saved_addr[9:4];
 wire [21:0] tag = saved_addr[31:10];
 wire [1:0] word_index = saved_addr[3:2];
-wire hit = line_valid[index] && line_tag[index] == tag;
+wire [6:0] way0_entry = {1'b0, index};
+wire [6:0] way1_entry = {1'b1, index};
+wire hit0 = line_valid[way0_entry] && line_tag[way0_entry] == tag;
+wire hit1 = WAYS == 2 && line_valid[way1_entry] &&
+            line_tag[way1_entry] == tag;
+wire hit = hit0 || hit1;
+wire hit_way = !hit0 && hit1;
+wire victim_way = WAYS == 1 ? 1'b0 :
+                  !line_valid[way0_entry] ? 1'b0 :
+                  !line_valid[way1_entry] ? 1'b1 : replacement_way[index];
+wire [6:0] hit_entry = {hit_way, index};
+wire [6:0] selected_entry = {selected_way, index};
+wire [6:0] indexed_entry = {WAYS == 2 && saved_addr[0], index};
+wire [6:0] maint_entry = saved_maint_code == 2 ?
+                         hit_entry : indexed_entry;
 wire bypass = saved_addr[31:16] == 16'hbfaf;
 wire [127:0] completed_line = {ret_data, refill_line[95:0]};
 
@@ -90,10 +106,10 @@ assign rd_addr = state == BYPASS_RD ? saved_addr :
 assign rd_len = state == BYPASS_RD ? 8'd0 : 8'd3;
 assign wr_req = state == WB_REQ || state == BYPASS_WR;
 assign wr_addr = state == BYPASS_WR ? saved_addr :
-                 {line_tag[index], index, 4'b0};
+                 {line_tag[selected_entry], index, 4'b0};
 assign wr_len = state == BYPASS_WR ? 8'd0 : 8'd3;
 assign wr_data = state == BYPASS_WR ? {96'b0, saved_wdata} :
-                 line_data[index];
+                 line_data[selected_entry];
 assign wr_strb = state == BYPASS_WR ? {12'b0, saved_we} : 16'hffff;
 
 always @(posedge clk) begin
@@ -105,12 +121,14 @@ always @(posedge clk) begin
         maintenance <= 1'b0;
         saved_maint_code <= 2'b0;
         invalidate_after_wb <= 1'b0;
+        selected_way <= 1'b0;
         saved_rdata <= 32'b0;
         beat <= 2'b0;
         refill_line <= 128'b0;
-        line_valid <= 64'b0;
-        line_dirty <= 64'b0;
-        for (i = 0; i < 64; i = i + 1)
+        line_valid <= 128'b0;
+        line_dirty <= 128'b0;
+        replacement_way <= 64'b0;
+        for (i = 0; i < 128; i = i + 1)
             line_tag[i] <= 22'b0;
     end else begin
         case (state)
@@ -130,17 +148,19 @@ always @(posedge clk) begin
                 if (maintenance) begin
                     // 0: Store Tag；1: 索引无效并写回；2: 命中无效并写回。
                     if (saved_maint_code == 0) begin
-                        line_tag[index] <= 22'b0;
-                        line_valid[index] <= 1'b0;
-                        line_dirty[index] <= 1'b0;
+                        line_tag[indexed_entry] <= 22'b0;
+                        line_valid[indexed_entry] <= 1'b0;
+                        line_dirty[indexed_entry] <= 1'b0;
                         state <= RESP;
-                    end else if ((saved_maint_code == 1 && line_valid[index]) ||
+                    end else if ((saved_maint_code == 1 &&
+                                  line_valid[indexed_entry]) ||
                                  (saved_maint_code == 2 && hit)) begin
-                        if (line_dirty[index]) begin
+                        selected_way <= maint_entry[6];
+                        if (line_dirty[maint_entry]) begin
                             invalidate_after_wb <= 1'b1;
                             state <= WB_REQ;
                         end else begin
-                            line_valid[index] <= 1'b0;
+                            line_valid[maint_entry] <= 1'b0;
                             state <= RESP;
                         end
                     end else begin
@@ -149,26 +169,32 @@ always @(posedge clk) begin
                 end else if (bypass) begin
                     state <= (|saved_we) ? BYPASS_WR : BYPASS_RD;
                 end else if (hit) begin
+                    replacement_way[index] <= !hit_way;
                     if (|saved_we) begin
-                        line_data[index] <= merge_store(
-                            line_data[index], word_index, saved_we, saved_wdata);
-                        line_dirty[index] <= 1'b1;
+                        line_data[hit_entry] <= merge_store(
+                            line_data[hit_entry], word_index,
+                            saved_we, saved_wdata);
+                        line_dirty[hit_entry] <= 1'b1;
                     end else begin
-                        saved_rdata <= line_data[index][word_index*32 +: 32];
+                        saved_rdata <= line_data[hit_entry][word_index*32 +: 32];
                     end
                     state <= RESP;
-                end else if (line_valid[index] && line_dirty[index]) begin
-                    invalidate_after_wb <= 1'b0;
-                    state <= WB_REQ;
                 end else begin
-                    state <= REFILL_REQ;
+                    selected_way <= victim_way;
+                    if (line_valid[{victim_way, index}] &&
+                        line_dirty[{victim_way, index}]) begin
+                        invalidate_after_wb <= 1'b0;
+                        state <= WB_REQ;
+                    end else begin
+                        state <= REFILL_REQ;
+                    end
                 end
             end
             WB_REQ: if (wr_ready) state <= WB_WAIT;
             WB_WAIT: if (wr_done) begin
-                line_dirty[index] <= 1'b0;
+                line_dirty[selected_entry] <= 1'b0;
                 if (invalidate_after_wb) begin
-                    line_valid[index] <= 1'b0;
+                    line_valid[selected_entry] <= 1'b0;
                     state <= RESP;
                 end else begin
                     state <= REFILL_REQ;
@@ -181,11 +207,12 @@ always @(posedge clk) begin
             REFILL: if (ret_valid) begin
                 refill_line[beat*32 +: 32] <= ret_data;
                 if (ret_last) begin
-                    line_data[index] <= merge_store(
+                    line_data[selected_entry] <= merge_store(
                         completed_line, word_index, saved_we, saved_wdata);
-                    line_tag[index] <= tag;
-                    line_valid[index] <= 1'b1;
-                    line_dirty[index] <= |saved_we;
+                    line_tag[selected_entry] <= tag;
+                    line_valid[selected_entry] <= 1'b1;
+                    line_dirty[selected_entry] <= |saved_we;
+                    replacement_way[index] <= !selected_way;
                     saved_rdata <= completed_line[word_index*32 +: 32];
                     state <= RESP;
                 end else begin

@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-module icache_tb;
+module icache_tb #(parameter WAYS = 1);
 reg clk = 0;
 always #5 clk = ~clk;
 reg resetn = 0;
@@ -20,7 +20,7 @@ reg ret_last = 0;
 reg [31:0] ret_data = 0;
 integer misses = 0;
 
-icache dut(
+icache #(.WAYS(WAYS)) dut(
     .clk(clk), .resetn(resetn), .req(req), .addr(addr),
     .addr_ok(addr_ok), .data_ok(data_ok), .rdata(rdata),
     .rd_req(rd_req), .rd_addr(rd_addr), .rd_ready(1'b1),
@@ -52,7 +52,8 @@ always @(posedge clk) begin
             else begin
                 ret_valid <= 1;
                 ret_last <= beat == 3;
-                ret_data <= (line_addr[10] ? 32'h200 : 32'h100) + beat;
+                ret_data <= (line_addr[11] ? 32'h300 :
+                             line_addr[10] ? 32'h200 : 32'h100) + beat;
                 wait_cycle <= 1;
                 if (beat == 3) active <= 0;
                 else beat <= beat + 1'b1;
@@ -100,16 +101,27 @@ endtask
 initial begin
     repeat (4) @(posedge clk);
     @(negedge clk) resetn = 1;
-    fetch(32'h1c000000, 32'h100, 1);
-    fetch(32'h1c000004, 32'h101, 1);
-    fetch(32'h1c000400, 32'h200, 2);
-    fetch(32'h1c000000, 32'h100, 3);
-    maintain(32'h1c000000, 2);
-    fetch(32'h1c000004, 32'h101, 4);
-    maintain(32'h1c000400, 1);
-    fetch(32'h1c000000, 32'h100, 5);
-    maintain(32'h1c000000, 0);
-    fetch(32'h1c000000, 32'h100, 6);
+    if (WAYS == 1) begin
+        fetch(32'h1c000000, 32'h100, 1);
+        fetch(32'h1c000004, 32'h101, 1);
+        fetch(32'h1c000400, 32'h200, 2);
+        fetch(32'h1c000000, 32'h100, 3);
+        maintain(32'h1c000000, 2);
+        fetch(32'h1c000004, 32'h101, 4);
+        maintain(32'h1c000400, 1);
+        fetch(32'h1c000000, 32'h100, 5);
+        maintain(32'h1c000000, 0);
+        fetch(32'h1c000000, 32'h100, 6);
+    end else begin
+        fetch(32'h1c000000, 32'h100, 1);
+        fetch(32'h1c000400, 32'h200, 2);
+        fetch(32'h1c000000, 32'h100, 2);
+        fetch(32'h1c000800, 32'h300, 3);
+        fetch(32'h1c000000, 32'h100, 3);
+        fetch(32'h1c000400, 32'h200, 4);
+        maintain(32'h1c000001, 1);
+        fetch(32'h1c000400, 32'h200, 5);
+    end
     $display("I-CACHE PASS");
     $finish;
 end

@@ -1,5 +1,5 @@
 // 64 行、每行 16 字节的直接映射指令 Cache。
-module icache(
+module icache #(parameter WAYS = 2)(
     input  wire        clk,
     input  wire        resetn,
     input  wire        req,
@@ -33,15 +33,29 @@ reg [31:0] saved_data;
 reg [1:0] saved_maint_code;
 reg [1:0] beat;
 reg [127:0] refill_line;
-reg [127:0] line_data [0:63];
-reg [21:0] line_tag [0:63];
-reg [63:0] line_valid;
+reg [127:0] line_data [0:127];
+reg [21:0] line_tag [0:127];
+reg [127:0] line_valid;
+reg [63:0] replacement_way;
+reg selected_way;
 integer i;
 
 wire [5:0] index = saved_addr[9:4];
 wire [21:0] tag = saved_addr[31:10];
 wire [1:0] word_index = saved_addr[3:2];
-wire hit = line_valid[index] && line_tag[index] == tag;
+wire [6:0] way0_entry = {1'b0, index};
+wire [6:0] way1_entry = {1'b1, index};
+wire hit0 = line_valid[way0_entry] && line_tag[way0_entry] == tag;
+wire hit1 = WAYS == 2 && line_valid[way1_entry] &&
+            line_tag[way1_entry] == tag;
+wire hit = hit0 || hit1;
+wire hit_way = !hit0 && hit1;
+wire victim_way = WAYS == 1 ? 1'b0 :
+                  !line_valid[way0_entry] ? 1'b0 :
+                  !line_valid[way1_entry] ? 1'b1 : replacement_way[index];
+wire [6:0] hit_entry = {hit_way, index};
+wire [6:0] selected_entry = {selected_way, index};
+wire [6:0] indexed_entry = {WAYS == 2 && saved_addr[0], index};
 
 assign addr_ok = state == IDLE && !maint_req;
 assign data_ok = state == RESP;
@@ -54,13 +68,15 @@ assign rd_addr = {saved_addr[31:4], 4'b0};
 always @(posedge clk) begin
     if (!resetn) begin
         state <= IDLE;
-        line_valid <= 64'b0;
+        line_valid <= 128'b0;
+        replacement_way <= 64'b0;
+        selected_way <= 1'b0;
         saved_addr <= 32'b0;
         saved_data <= 32'b0;
         saved_maint_code <= 2'b0;
         beat <= 2'b0;
         refill_line <= 128'b0;
-        for (i = 0; i < 64; i = i + 1)
+        for (i = 0; i < 128; i = i + 1)
             line_tag[i] <= 22'b0;
     end else begin
         case (state)
@@ -74,9 +90,11 @@ always @(posedge clk) begin
             end
             LOOKUP: begin
                 if (hit) begin
-                    saved_data <= line_data[index][word_index*32 +: 32];
+                    saved_data <= line_data[hit_entry][word_index*32 +: 32];
+                    replacement_way[index] <= !hit_way;
                     state <= RESP;
                 end else begin
+                    selected_way <= victim_way;
                     state <= READ_ADDR;
                 end
             end
@@ -90,9 +108,10 @@ always @(posedge clk) begin
                     saved_data <= ret_data;
                 if (ret_last) begin
                     // 最后一个 beat 同拍写入，避免使用尚未更新的 refill_line。
-                    line_data[index] <= {ret_data, refill_line[95:0]};
-                    line_tag[index] <= tag;
-                    line_valid[index] <= 1'b1;
+                    line_data[selected_entry] <= {ret_data, refill_line[95:0]};
+                    line_tag[selected_entry] <= tag;
+                    line_valid[selected_entry] <= 1'b1;
+                    replacement_way[index] <= !selected_way;
                     state <= RESP;
                 end else begin
                     beat <= beat + 1'b1;
@@ -102,11 +121,12 @@ always @(posedge clk) begin
             MAINT: begin
                 // 0: Store Tag；1: 索引无效；2: 命中无效。
                 if (saved_maint_code == 0) begin
-                    line_valid[index] <= 1'b0;
-                    line_tag[index] <= 22'b0;
+                    line_valid[indexed_entry] <= 1'b0;
+                    line_tag[indexed_entry] <= 22'b0;
                 end else if (saved_maint_code == 1 ||
                              (saved_maint_code == 2 && hit)) begin
-                    line_valid[index] <= 1'b0;
+                    line_valid[saved_maint_code == 2 ?
+                               hit_entry : indexed_entry] <= 1'b0;
                 end
                 state <= MAINT_RESP;
             end

@@ -5,18 +5,19 @@
 在仓库根目录运行：
 
 ```sh
-iverilog -g2012 -s axi_cpu_tb -I labs/lab01/mycpu_env/myCPU \
+iverilog -g2012 -s axi_cpu_tb -P axi_cpu_tb.WAYS=2 \
+  -I labs/lab01/mycpu_env/myCPU \
   -o /tmp/axi_cpu_tb labs/lab01/mycpu_env/myCPU/*.v \
   labs/lab01/mycpu_env/tests/axi_cpu_tb.v
 vvp /tmp/axi_cpu_tb
 ```
 
-测试模型会分别延迟读地址、读数据、写地址和写数据，检查整字与字节访问、依赖指令、分支错误路径、D-Cache 脏行写回、`cacop` 的索引/命中写回，以及 `0xbfaf_f020` 外设地址的绕过访问。I-Cache 和 D-Cache 缺失时发 4 拍突发读取；D-Cache 写回也使用 4 拍突发写入。
+测试模型会分别延迟读地址、读数据、写地址和写数据，检查整字与字节访问、依赖指令、分支错误路径、D-Cache 脏行写回、`cacop` 的索引/命中写回，以及 `0xbfaf_f020` 外设地址的绕过访问。把 `WAYS` 改为 1 可回归一路实现；`mycpu_top` 默认使用两路。I-Cache 和 D-Cache 缺失时发 4 拍突发读取；D-Cache 写回也使用 4 拍突发写入。
 
 单独检查 I-Cache 命中、同索引替换和三种维护操作：
 
 ```sh
-iverilog -g2012 -s icache_tb -o /tmp/icache_tb \
+iverilog -g2012 -s icache_tb -P icache_tb.WAYS=2 -o /tmp/icache_tb \
   labs/lab01/mycpu_env/myCPU/icache.v labs/lab01/mycpu_env/tests/icache_tb.v
 vvp /tmp/icache_tb
 ```

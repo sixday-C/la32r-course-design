@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-module axi_cpu_tb;
+module axi_cpu_tb #(parameter WAYS = 1);
 reg clk = 0;
 always #5 clk = ~clk;
 reg resetn = 0;
@@ -36,7 +36,7 @@ wire [3:0] debug_wb_rf_we;
 wire [4:0] debug_wb_rf_wnum;
 wire [31:0] debug_wb_rf_wdata;
 
-mycpu_top cpu(
+mycpu_top #(.CACHE_WAYS(WAYS)) cpu(
     .aclk(clk), .aresetn(resetn),
     .arid(arid), .araddr(araddr), .arlen(arlen),
     .arvalid(arvalid), .arready(arready),
@@ -52,7 +52,7 @@ mycpu_top cpu(
 );
 
 reg [31:0] imem [0:31];
-reg [31:0] dmem [0:271];
+reg [31:0] dmem [0:527];
 initial begin
     // addi.w r1,r0,5; st.w r1,r0,0; ld.w r2,r0,0; addi.w r3,r2,1
     imem[0] = 32'h02801401;
@@ -74,11 +74,13 @@ initial begin
     imem[14] = 32'h29800145;
     imem[15] = 32'h2880014b;
     imem[16] = 32'h29800105;
-    imem[17] = 32'h06000109;
+    imem[17] = 32'h06000509;
     imem[18] = 32'h2880010c;
     imem[19] = 32'h29800109;
     imem[20] = 32'h06000111;
     imem[21] = 32'h2880010e;
+    imem[22] = 32'h0290010d;
+    imem[23] = 32'h288001af;
     dmem[0] = 32'b0;
     dmem[1] = 32'b0;
     dmem[2] = 32'b0;
@@ -87,6 +89,10 @@ initial begin
     dmem[257] = 32'b0;
     dmem[258] = 32'b0;
     dmem[259] = 32'b0;
+    dmem[512] = 32'habc;
+    dmem[513] = 32'b0;
+    dmem[514] = 32'b0;
+    dmem[515] = 32'b0;
 end
 
 reg read_pending = 0;
@@ -234,7 +240,8 @@ always @(posedge clk) begin
         end
         if (debug_wb_rf_wnum == 9) begin
             if (!seen_r7 || debug_wb_rf_wdata !== 32'h1234 ||
-                dmem[0] !== 32'h00007f05)
+                (WAYS == 1 && dmem[0] !== 32'h00007f05) ||
+                (WAYS == 2 && dmem[0] !== 32'b0))
                 $fatal(1, "dirty eviction mismatch");
         end
         if (debug_wb_rf_wnum == 11) begin
@@ -252,7 +259,12 @@ always @(posedge clk) begin
             if (debug_wb_rf_wdata !== 32'h1234 ||
                 dmem[256] !== 32'h1234)
                 $fatal(1, "hit CACOP did not write back");
-            $display("AXI CPU AND CACOP PASS");
+        end
+        if (debug_wb_rf_wnum == 15) begin
+            if (debug_wb_rf_wdata !== 32'habc ||
+                dmem[0] !== 32'h00007f05)
+                $fatal(1, "two-way dirty replacement mismatch");
+            $display("AXI CPU AND CACOP PASS (ways=%0d)", WAYS);
             $finish;
         end
     end
