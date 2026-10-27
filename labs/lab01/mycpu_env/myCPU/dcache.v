@@ -95,11 +95,14 @@ function [127:0] merge_store;
     end
 endfunction
 
-assign addr_ok = state == IDLE && !maint_req;
-assign data_ok = state == RESP && !maintenance;
-assign maint_ready = state == IDLE;
+wire hit_response = state == LOOKUP && !maintenance && !bypass && hit;
+wire accept_slot = state == IDLE || hit_response || state == RESP;
+assign addr_ok = accept_slot && !maint_req;
+assign data_ok = hit_response || (state == RESP && !maintenance);
+assign maint_ready = accept_slot;
 assign maint_done = state == RESP && maintenance;
-assign rdata = saved_rdata;
+assign rdata = hit_response ? line_data[hit_entry][word_index*32 +: 32] :
+               saved_rdata;
 assign rd_req = state == REFILL_REQ || state == BYPASS_RD;
 assign rd_addr = state == BYPASS_RD ? saved_addr :
                  {saved_addr[31:4], 4'b0};
@@ -175,10 +178,22 @@ always @(posedge clk) begin
                             line_data[hit_entry], word_index,
                             saved_we, saved_wdata);
                         line_dirty[hit_entry] <= 1'b1;
-                    end else begin
-                        saved_rdata <= line_data[hit_entry][word_index*32 +: 32];
                     end
-                    state <= RESP;
+                    // 命中结果与下一条请求可在同一个时钟沿交接。
+                    if (maint_req) begin
+                        saved_addr <= maint_addr;
+                        saved_maint_code <= maint_code;
+                        maintenance <= 1'b1;
+                        state <= LOOKUP;
+                    end else if (req) begin
+                        saved_addr <= addr;
+                        saved_we <= we;
+                        saved_wdata <= wdata;
+                        maintenance <= 1'b0;
+                        state <= LOOKUP;
+                    end else begin
+                        state <= IDLE;
+                    end
                 end else begin
                     selected_way <= victim_way;
                     if (line_valid[{victim_way, index}] &&
@@ -226,7 +241,22 @@ always @(posedge clk) begin
             end
             BYPASS_WR: if (wr_ready) state <= BYPASS_W;
             BYPASS_W: if (wr_done) state <= RESP;
-            RESP: state <= IDLE;
+            RESP: begin
+                if (maint_req) begin
+                    saved_addr <= maint_addr;
+                    saved_maint_code <= maint_code;
+                    maintenance <= 1'b1;
+                    state <= LOOKUP;
+                end else if (req) begin
+                    saved_addr <= addr;
+                    saved_we <= we;
+                    saved_wdata <= wdata;
+                    maintenance <= 1'b0;
+                    state <= LOOKUP;
+                end else begin
+                    state <= IDLE;
+                end
+            end
             default: state <= IDLE;
         endcase
     end

@@ -22,4 +22,15 @@ iverilog -g2012 -s icache_tb -P icache_tb.WAYS=2 -o /tmp/icache_tb \
 vvp /tmp/icache_tb
 ```
 
+逐拍检查 D-Cache 连续命中请求：
+
+```sh
+iverilog -g2012 -s dcache_pipeline_tb -o /tmp/dcache_pipeline_tb \
+  labs/lab01/mycpu_env/myCPU/dcache.v \
+  labs/lab01/mycpu_env/tests/dcache_pipeline_tb.v
+vvp /tmp/dcache_pipeline_tb
+```
+
+两个 Cache 的命中响应与下一条请求在同一时钟沿交接；缺失和维护操作仍会暂停接收。CPU 当前每个访存端口只保留一笔未完成请求，因此逐拍吞吐由模块测试验证。
+
 `cacop` 按参考手册实现 code[4:3] 为 0（Store Tag）、1（索引无效/写回）、2（命中无效/写回），对象 code[2:0] 为 0（I-Cache）或 1（D-Cache）。当前 CPU 没有地址翻译/TLB，课程 n73–n78 中涉及 DMW/TLB 的部分不能作为本阶段的完整验收。

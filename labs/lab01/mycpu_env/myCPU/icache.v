@@ -57,11 +57,14 @@ wire [6:0] hit_entry = {hit_way, index};
 wire [6:0] selected_entry = {selected_way, index};
 wire [6:0] indexed_entry = {WAYS == 2 && saved_addr[0], index};
 
-assign addr_ok = state == IDLE && !maint_req;
-assign data_ok = state == RESP;
-assign maint_ready = state == IDLE;
+wire hit_response = state == LOOKUP && hit;
+wire accept_slot = state == IDLE || hit_response || state == RESP;
+assign addr_ok = accept_slot && !maint_req;
+assign data_ok = hit_response || state == RESP;
+assign maint_ready = accept_slot;
 assign maint_done = state == MAINT_RESP;
-assign rdata = saved_data;
+assign rdata = hit_response ? line_data[hit_entry][word_index*32 +: 32] :
+               saved_data;
 assign rd_req = state == READ_ADDR;
 assign rd_addr = {saved_addr[31:4], 4'b0};
 
@@ -90,9 +93,18 @@ always @(posedge clk) begin
             end
             LOOKUP: begin
                 if (hit) begin
-                    saved_data <= line_data[hit_entry][word_index*32 +: 32];
                     replacement_way[index] <= !hit_way;
-                    state <= RESP;
+                    // 本条命中响应的同时，下一条请求可以进入查找级。
+                    if (maint_req) begin
+                        saved_addr <= maint_addr;
+                        saved_maint_code <= maint_code;
+                        state <= MAINT;
+                    end else if (req) begin
+                        saved_addr <= addr;
+                        state <= LOOKUP;
+                    end else begin
+                        state <= IDLE;
+                    end
                 end else begin
                     selected_way <= victim_way;
                     state <= READ_ADDR;
@@ -117,7 +129,18 @@ always @(posedge clk) begin
                     beat <= beat + 1'b1;
                 end
             end
-            RESP: state <= IDLE;
+            RESP: begin
+                if (maint_req) begin
+                    saved_addr <= maint_addr;
+                    saved_maint_code <= maint_code;
+                    state <= MAINT;
+                end else if (req) begin
+                    saved_addr <= addr;
+                    state <= LOOKUP;
+                end else begin
+                    state <= IDLE;
+                end
+            end
             MAINT: begin
                 // 0: Store Tag；1: 索引无效；2: 命中无效。
                 if (saved_maint_code == 0) begin

@@ -82,6 +82,28 @@ task fetch;
     end
 endtask
 
+// 已经填充的四条指令连续发出，逐拍检查请求和响应。
+task stream_hits;
+    integer word_no;
+    begin
+        @(negedge clk);
+        addr = 32'h1c000000;
+        req = 1;
+        @(posedge clk);
+        if (!addr_ok) $fatal(1, "first pipeline request rejected");
+        for (word_no = 0; word_no < 4; word_no = word_no + 1) begin
+            @(negedge clk);
+            if (word_no < 3) addr = 32'h1c000004 + word_no*4;
+            else req = 0;
+            @(posedge clk);
+            if (!data_ok || rdata !== 32'h100 + word_no)
+                $fatal(1, "pipelined I-Cache result %0d", word_no);
+            if (word_no < 3 && !addr_ok)
+                $fatal(1, "I-Cache hit did not accept next request");
+        end
+    end
+endtask
+
 task maintain;
     input [31:0] address;
     input [1:0] operation;
@@ -122,6 +144,7 @@ initial begin
         maintain(32'h1c000001, 1);
         fetch(32'h1c000400, 32'h200, 5);
     end
+    stream_hits();
     $display("I-CACHE PASS");
     $finish;
 end
