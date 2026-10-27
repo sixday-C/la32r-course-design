@@ -47,6 +47,10 @@ wire inst_req;
 wire [31:0] inst_addr;
 wire inst_addr_ok;
 wire inst_data_ok;
+wire [31:0] inst_rdata;
+wire ic_rd_req;
+wire [31:0] ic_rd_addr;
+wire ic_rd_ready;
 wire data_req;
 wire [3:0] data_we;
 wire [31:0] data_addr;
@@ -58,7 +62,7 @@ mycpu_core u_core(
     .clk(aclk), .resetn(aresetn), .hw_int_in(8'b0),
     .inst_req(inst_req), .inst_addr(inst_addr),
     .inst_addr_ok(inst_addr_ok), .inst_data_ok(inst_data_ok),
-    .inst_rdata(rdata),
+    .inst_rdata(inst_rdata),
     .data_req(data_req), .data_we(data_we),
     .data_addr(data_addr), .data_wdata(data_wdata),
     .data_addr_ok(data_addr_ok), .data_data_ok(data_data_ok),
@@ -68,20 +72,29 @@ mycpu_core u_core(
     .debug_wb_rf_wdata(debug_wb_rf_wdata)
 );
 
+icache u_icache(
+    .clk(aclk), .resetn(aresetn),
+    .req(inst_req), .addr(inst_addr),
+    .addr_ok(inst_addr_ok), .data_ok(inst_data_ok), .rdata(inst_rdata),
+    .rd_req(ic_rd_req), .rd_addr(ic_rd_addr),
+    .rd_ready(ic_rd_ready),
+    .ret_valid(rvalid && rready && rid == 4'd0),
+    .ret_last(rlast), .ret_data(rdata)
+);
+
 wire data_read = data_req && !(|data_we);
 wire data_write = data_req && (|data_we);
-// 数据读优先；两路读请求在对方未被选中时保持，直到 AR 握手。
-assign arvalid = data_read || inst_req;
+// 数据读优先；I-Cache 缺失时请求一整行（4 个 32 位 beat）。
+assign arvalid = data_read || ic_rd_req;
 assign arid = data_read ? 4'd1 : 4'd0;
-assign araddr = data_read ? data_addr : inst_addr;
-assign arlen = 8'd0;
+assign araddr = data_read ? data_addr : ic_rd_addr;
+assign arlen = data_read ? 8'd0 : 8'd3;
 assign arsize = 3'd2;
 assign arburst = 2'b01;
 assign arlock = 2'b00;
 assign arcache = 4'b0000;
 assign arprot = 3'b000;
-assign inst_addr_ok = inst_req && !data_read && arready;
-assign inst_data_ok = rvalid && rready && rid == 4'd0 && rlast;
+assign ic_rd_ready = ic_rd_req && !data_read && arready;
 assign rready = aresetn && (rid == 4'd0 || rid == 4'd1);
 
 reg write_busy;

@@ -11,4 +11,12 @@ iverilog -g2012 -s axi_cpu_tb -I labs/lab01/mycpu_env/myCPU \
 vvp /tmp/axi_cpu_tb
 ```
 
-测试模型会分别延迟读地址、读数据、写地址和写数据，检查整字读写、字节写、依赖指令以及分支错误路径。AXI 顶层目前发单拍读写事务；后续 Cache 接入时再使用整行突发事务。
+测试模型会分别延迟读地址、读数据、写地址和写数据，检查整字读写、字节写、依赖指令以及分支错误路径。I-Cache 缺失时发 4 拍突发读取；D 端当前仍是单拍事务。
+
+单独检查 I-Cache 命中和同索引替换：
+
+```sh
+iverilog -g2012 -s icache_tb -o /tmp/icache_tb \
+  labs/lab01/mycpu_env/myCPU/icache.v labs/lab01/mycpu_env/tests/icache_tb.v
+vvp /tmp/icache_tb
+```

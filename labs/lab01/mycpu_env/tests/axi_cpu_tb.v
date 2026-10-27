@@ -12,11 +12,13 @@ end
 
 wire [3:0] arid;
 wire [31:0] araddr;
+wire [7:0] arlen;
 wire arvalid;
 wire arready;
 reg [3:0] rid = 0;
 reg [31:0] rdata = 0;
 reg rvalid = 0;
+reg rlast = 0;
 wire rready;
 wire [31:0] awaddr;
 wire awvalid;
@@ -34,8 +36,9 @@ wire [31:0] debug_wb_rf_wdata;
 
 mycpu_top cpu(
     .aclk(clk), .aresetn(resetn),
-    .arid(arid), .araddr(araddr), .arvalid(arvalid), .arready(arready),
-    .rid(rid), .rdata(rdata), .rresp(2'b0), .rlast(1'b1),
+    .arid(arid), .araddr(araddr), .arlen(arlen),
+    .arvalid(arvalid), .arready(arready),
+    .rid(rid), .rdata(rdata), .rresp(2'b0), .rlast(rlast),
     .rvalid(rvalid), .rready(rready),
     .awaddr(awaddr), .awvalid(awvalid), .awready(awready),
     .wdata(wdata), .wstrb(wstrb), .wvalid(wvalid), .wready(wready),
@@ -66,6 +69,9 @@ reg read_pending = 0;
 reg [2:0] read_wait = 0;
 reg [3:0] read_id;
 reg [31:0] read_addr;
+reg [7:0] read_len;
+reg [7:0] read_beat;
+integer inst_line_reads = 0;
 assign arready = !read_pending && cycle[0];
 always @(posedge clk) begin
     if (!resetn) begin
@@ -77,19 +83,34 @@ always @(posedge clk) begin
             read_wait <= 3;
             read_id <= arid;
             read_addr <= araddr;
+            read_len <= arlen;
+            read_beat <= 0;
+            if (arid == 0) begin
+                if (arlen != 3 || |araddr[3:0])
+                    $fatal(1, "I-Cache must request aligned 4-beat line");
+                inst_line_reads <= inst_line_reads + 1;
+            end else if (arlen != 0) begin
+                $fatal(1, "uncached data request must be one beat");
+            end
         end
         if (read_pending && !rvalid) begin
             if (read_wait != 0) read_wait <= read_wait - 1'b1;
             else begin
                 rid <= read_id;
-                rdata <= read_addr[28] ? imem[read_addr[5:2]] :
-                                         dmem[read_addr[5:2]];
+                rdata <= read_addr[28] ?
+                    imem[read_addr[5:2] + read_beat] :
+                    dmem[read_addr[5:2] + read_beat];
+                rlast <= read_beat == read_len;
                 rvalid <= 1;
             end
         end
         if (rvalid && rready) begin
             rvalid <= 0;
-            read_pending <= 0;
+            if (rlast) read_pending <= 0;
+            else begin
+                read_beat <= read_beat + 1'b1;
+                read_wait <= 1;
+            end
         end
     end
 end
@@ -161,7 +182,7 @@ always @(posedge clk) begin
         end
         if (debug_wb_rf_wnum == 7) begin
             if (!seen_r5 || debug_wb_rf_wdata !== 127 ||
-                dmem[0] !== 32'h00007f05)
+                dmem[0] !== 32'h00007f05 || inst_line_reads != 3)
                 $fatal(1, "byte store/load mismatch");
             $display("AXI CPU PASS");
             $finish;
