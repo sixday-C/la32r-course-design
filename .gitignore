@@ -4,3 +4,7 @@ labs/**/obj_dir/
 labs/**/project/
 labs/**/*.vcd
 labs/**/*.fst
+labs/**/soc_demo/build/
+labs/**/soc_demo/out/
+labs/**/examples/peripherals/*.o
+labs/**/examples/peripherals/*.bin
