@@ -15,6 +15,14 @@ always @(posedge clk_50M) begin
     clk_25M <= !clk_25M;
 end
 
+// 配置完成后先复位若干拍，让 CPU 从程序入口开始取指。
+reg [5:0] startup_reset_count = 6'b0;
+always @(posedge clk_25M) begin
+    if (!(&startup_reset_count))
+        startup_reset_count <= startup_reset_count + 1'b1;
+end
+wire cpu_resetn = !reset_btn && (&startup_reset_count);
+
 wire [15:0] local_led;
 wire [31:0] local_num;
 soc_demo_top #(
@@ -22,7 +30,7 @@ soc_demo_top #(
     .ROM_WORDS(18)
 ) u_soc(
     .clk(clk_25M),
-    .resetn(!reset_btn),
+    .resetn(cpu_resetn),
     .switch(~dip_sw[7:0]),
     .buttons({12'b0, touch_btn}),
     .uart_rxd(rxd),

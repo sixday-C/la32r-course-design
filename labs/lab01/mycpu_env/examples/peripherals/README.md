@@ -36,4 +36,4 @@ iverilog -g2012 -s uart_echo_tb -I labs/lab01/mycpu_env/myCPU \
 vvp /tmp/uart_echo_tb
 ```
 
-远程板卡构建脚本为 `labs/lab01/mycpu_env/soc_demo/build_openxc7.py`。默认使用仓库旁边已有的 `bitstream-openxc7/tools`；也可设置 `OPENXC7_TOOLS` 指向工具目录。输出文件为 `soc_demo/out/uart_echo_25MHz.bit`。远程板卡上使用低 8 位拨码开关、4 个触摸按键，LED 显示结果低 16 位，两个数码管显示结果低 8 位；`txd`、`rxd` 是 UART 串口引脚。
+远程板卡构建脚本为 `labs/lab01/mycpu_env/soc_demo/build_openxc7.py`。默认使用仓库旁边已有的 `bitstream-openxc7/tools`；也可设置 `OPENXC7_TOOLS` 指向工具目录。脚本先核对综合后的指令 ROM 与 `uart_echo.hex`，也可以用 `--check-rom` 单独检查。输出文件为 `soc_demo/out/uart_echo_25MHz.bit`。远程板卡上使用低 8 位拨码开关、4 个触摸按键，LED 显示结果低 16 位，两个数码管显示结果低 8 位；`txd`、`rxd` 是 UART 串口引脚。

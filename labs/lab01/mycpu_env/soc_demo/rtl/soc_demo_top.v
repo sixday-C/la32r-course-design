@@ -58,7 +58,7 @@ reg [31:0] inst_rom [0:255];
 reg [31:0] data_ram [0:1023];
 integer i;
 initial begin
-    for (i = 0; i < 256; i = i + 1) inst_rom[i] = 32'b0;
+    // 指令 ROM 只由程序文件初始化；先整表清零会让综合结果丢掉程序。
     for (i = 0; i < 1024; i = i + 1) data_ram[i] = 32'b0;
     $readmemh(ROM_FILE, inst_rom, 0, ROM_WORDS - 1);
 end
@@ -95,7 +95,10 @@ uart_mmio #(.CLKS_PER_BIT(UART_CLKS_PER_BIT)) u_uart(
     .tx_write(uart_write_fire), .tx_data(wdata[7:0]), .tx_ready(uart_tx_ready),
     .rx_read(uart_read_fire), .rx_data(uart_rx_data), .rx_valid(uart_rx_valid)
 );
-assign rdata = read_id == 0 ? inst_rom[current_read_addr[9:2]] :
+// 程序文件只覆盖实际指令；越过程序末尾时返回 0（非法指令）。
+assign rdata = read_id == 0 ?
+               current_read_addr[9:2] < ROM_WORDS ?
+               inst_rom[current_read_addr[9:2]] : 32'b0 :
                current_read_addr[31:16] == 16'hbfaf ?
                current_read_addr[15:0] == 16'hf020 ? {16'b0, led} :
                current_read_addr[15:0] == 16'hf050 ? num_data :

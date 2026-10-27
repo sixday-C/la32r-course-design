@@ -2,7 +2,7 @@
 module remote_demo_tb;
 reg clk_50M = 0;
 always #10 clk_50M = ~clk_50M;
-reg reset_btn = 1;
+reg reset_btn = 0;
 reg [31:0] dip_sw = 32'hfc;
 reg [3:0] touch_btn = 0;
 wire [15:0] leds;
@@ -16,8 +16,7 @@ looongson_remote_top dut(
     .txd(txd), .rxd(1'b1)
 );
 initial begin
-    repeat (5) @(posedge clk_50M);
-    @(negedge clk_50M) reset_btn = 0;
+    // 不按复位键，也应在 bit 加载后从程序入口启动。
     wait (leds == ~16'h0003 && dut.local_num == 32'h3);
     @(negedge clk_50M);
     if (dpy0 !== 8'hb6 || dpy1 !== 8'h7e)

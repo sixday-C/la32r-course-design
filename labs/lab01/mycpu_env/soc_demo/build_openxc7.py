@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """用同一套 openXC7 工具生成远程板卡的演示 bitstream。"""
 from pathlib import Path
+import json
 import os
 import re
 import shutil
@@ -44,14 +45,50 @@ def run(name: str, command: list[str]) -> None:
                        stderr=subprocess.STDOUT, check=True)
 
 
+def check_rom_init() -> None:
+    # 仿真能读到 hex，不代表综合后的 ROM 仍有这些指令。
+    source = (HERE / "synth.ys").read_text().splitlines()
+    read_verilog = next(line for line in source if line.startswith("read_verilog "))
+    rom_json = BUILD / "rom_check.json"
+    script = BUILD / "rom_check.ys"
+    script.write_text("\n".join([
+        read_verilog,
+        "hierarchy -top looongson_remote_top",
+        "proc",
+        "opt",
+        "memory_collect",
+        f"write_json {rom_json.relative_to(REPO)}",
+    ]) + "\n")
+    run("rom-check", [str(TOOLS / "oss-cad-suite/bin/yosys"),
+                      "-Q", "-T", str(script)])
+    modules = json.loads(rom_json.read_text())["modules"]
+    soc = next(module for name, module in modules.items()
+               if name.endswith("\\soc_demo_top"))
+    rom = soc["cells"]["inst_rom"]
+    init = rom["parameters"]["INIT"]
+    width = int(rom["parameters"]["WIDTH"], 2)
+    expected = [int(line, 16) for line in
+                (REPO / "labs/lab01/mycpu_env/examples/peripherals/uart_echo.hex")
+                .read_text().splitlines() if line.strip()]
+    actual = [int(init[-(index + 1) * width:][:width], 2)
+              for index in range(len(expected))]
+    if width != 32 or actual != expected:
+        raise RuntimeError("综合后的指令 ROM 与 uart_echo.hex 不一致")
+
+
+if "--check-rom" in sys.argv:
+    check_rom_init()
+    sys.exit(0)
+
 if "--resume-frames" not in sys.argv:
+    check_rom_init()
     run("synthesis", [str(TOOLS / "oss-cad-suite/bin/yosys"), "-Q", "-T",
                       str(HERE / "synth.ys")])
     run("place-route", [str(TOOLS / "openxc7/bin/nextpnr-xilinx"),
                         "--chipdb", str(TOOLS / "chipdb/xc7a200tfbg676.bin"),
                         "--json", str(BUILD / "soc.json"),
                         "--xdc", str(BUILD / "remote.xdc"),
-                        "--freq", "25", "--placer", "heap", "--seed", "2",
+                        "--freq", "25", "--placer", "heap", "--seed", "3",
                         "--fasm", str(BUILD / "remote.fasm"),
                         "--report", str(BUILD / "timing.json")])
 database = TOOLS / "openxc7/share/nextpnr/external/prjxray-db/artix7"
