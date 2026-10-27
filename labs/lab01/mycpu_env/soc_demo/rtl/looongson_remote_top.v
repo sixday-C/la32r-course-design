@@ -17,17 +17,20 @@ end
 
 wire [15:0] local_led;
 wire [31:0] local_num;
-soc_demo_top u_soc(
+soc_demo_top #(
+    .ROM_FILE("labs/lab01/mycpu_env/examples/peripherals/uart_echo.hex"),
+    .ROM_WORDS(18)
+) u_soc(
     .clk(clk_25M),
     .resetn(!reset_btn),
     .switch(~dip_sw[7:0]),
     .buttons({12'b0, touch_btn}),
+    .uart_rxd(rxd),
+    .uart_txd(txd),
     .led(local_led),
     .num_data(local_num)
 );
 assign leds = ~local_led;
-assign txd = 1'b1;
-
 function [7:0] seg7;
     input [3:0] digit;
     reg [6:0] segments;

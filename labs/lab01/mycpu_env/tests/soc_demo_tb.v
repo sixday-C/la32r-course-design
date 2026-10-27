@@ -10,6 +10,7 @@ wire [31:0] num_data;
 soc_demo_top dut(
     .clk(clk), .resetn(resetn),
     .switch(switch), .buttons(buttons),
+    .uart_rxd(1'b1), .uart_txd(),
     .led(led), .num_data(num_data)
 );
 initial begin
