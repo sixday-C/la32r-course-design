@@ -33,6 +33,8 @@ vvp /tmp/dcache_pipeline_tb
 
 两个 Cache 的命中响应与下一条请求在同一时钟沿交接；缺失和维护操作仍会暂停接收。CPU 当前每个访存端口只保留一笔未完成请求，因此逐拍吞吐由模块测试验证。
 
+普通 RAM 写入可进入两项 store buffer；load、外设访问和 `cacop` 会等已确认的写入排空。`mycpu_top.STORE_BUFFER=0` 保留原来的同步等待路径。`store_buffer_tb.v` 检查写入顺序、load/MMIO 阻塞和暖复位保留；`store_buffer_perf_tb.v` 用同一程序分别运行关闭/开启配置，以 LED 完成时刻比较周期数。基准程序由 `tests/bench_store_buffer.S` 生成对应的 `.hex`。
+
 取指阶段使用 64 项 BTB 和两位饱和计数器。ID 阶段比较预测与实际下一 PC，只有预测错误才重定向；异常、`ertn` 和 I-Cache 维护仍以流水线清空为准。
 
 `cacop` 按参考手册实现 code[4:3] 为 0（Store Tag）、1（索引无效/写回）、2（命中无效/写回），对象 code[2:0] 为 0（I-Cache）或 1（D-Cache）。当前 CPU 没有地址翻译/TLB，课程 n73–n78 中涉及 DMW/TLB 的部分不能作为本阶段的完整验收。

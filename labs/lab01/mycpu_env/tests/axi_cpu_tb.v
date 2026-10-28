@@ -1,9 +1,9 @@
 `timescale 1ns/1ps
-module axi_cpu_tb #(parameter WAYS = 1);
+module axi_cpu_tb #(parameter WAYS = 1, parameter STORE_BUFFER = 1);
 reg clk = 0;
 always #5 clk = ~clk;
 reg resetn = 0;
-reg [7:0] cycle = 0;
+reg [31:0] cycle = 0;
 always @(posedge clk) cycle <= cycle + 1'b1;
 initial begin
     repeat (5) @(posedge clk);
@@ -36,7 +36,7 @@ wire [3:0] debug_wb_rf_we;
 wire [4:0] debug_wb_rf_wnum;
 wire [31:0] debug_wb_rf_wdata;
 
-mycpu_top #(.CACHE_WAYS(WAYS)) cpu(
+mycpu_top #(.CACHE_WAYS(WAYS), .STORE_BUFFER(STORE_BUFFER)) cpu(
     .aclk(clk), .aresetn(resetn),
     .arid(arid), .araddr(araddr), .arlen(arlen),
     .arvalid(arvalid), .arready(arready),
@@ -285,7 +285,8 @@ always @(posedge clk) begin
                 branch_redirects != 2 || predicted_branches < 1)
                 $fatal(1, "branch prediction mismatch: redirects=%0d predicted=%0d",
                        branch_redirects, predicted_branches);
-            $display("AXI CPU, CACHE AND PREDICTOR PASS (ways=%0d)", WAYS);
+            $display("AXI CPU, CACHE AND PREDICTOR PASS (ways=%0d, store_buffer=%0d, cycles=%0d)",
+                     WAYS, STORE_BUFFER, cycle);
             $finish;
         end
     end

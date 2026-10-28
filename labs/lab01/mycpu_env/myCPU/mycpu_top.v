@@ -1,5 +1,8 @@
 // AXI 顶层。读 ID 0 给取指，读 ID 1 给访存；CPU 每个端口最多一笔未完成请求。
-module mycpu_top #(parameter CACHE_WAYS = 2)(
+module mycpu_top #(
+    parameter CACHE_WAYS = 2,
+    parameter STORE_BUFFER = 1
+)(
     input  wire        aclk,
     input  wire        aresetn,
     output wire [3:0]  arid,
@@ -60,6 +63,14 @@ wire [31:0] data_wdata;
 wire data_addr_ok;
 wire data_data_ok;
 wire [31:0] data_rdata;
+wire dc_cpu_req;
+wire [3:0] dc_cpu_we;
+wire [31:0] dc_cpu_addr;
+wire [31:0] dc_cpu_wdata;
+wire dc_cpu_addr_ok;
+wire dc_cpu_data_ok;
+wire [31:0] dc_cpu_rdata;
+wire stores_drained;
 wire dc_rd_req;
 wire [31:0] dc_rd_addr;
 wire [7:0] dc_rd_len;
@@ -80,15 +91,17 @@ wire ic_maint_ready;
 wire ic_maint_done;
 wire dc_maint_ready;
 wire dc_maint_done;
-wire ic_maint_req = cache_cmd_req && cache_cmd_code[2:0] == 3'd0;
-wire dc_maint_req = cache_cmd_req && cache_cmd_code[2:0] == 3'd1;
+wire cache_cmd_issue = cache_cmd_req && stores_drained;
+wire ic_maint_req = cache_cmd_issue && cache_cmd_code[2:0] == 3'd0;
+wire dc_maint_req = cache_cmd_issue && cache_cmd_code[2:0] == 3'd1;
 reg unsupported_done;
-assign cache_cmd_ready = ic_maint_req ? ic_maint_ready :
+assign cache_cmd_ready = !stores_drained ? 1'b0 :
+                         ic_maint_req ? ic_maint_ready :
                          dc_maint_req ? dc_maint_ready : 1'b1;
 assign cache_cmd_done = ic_maint_done || dc_maint_done || unsupported_done;
 always @(posedge aclk) begin
     if (!aresetn) unsupported_done <= 1'b0;
-    else unsupported_done <= cache_cmd_req &&
+    else unsupported_done <= cache_cmd_issue &&
          cache_cmd_code[2:0] != 3'd0 && cache_cmd_code[2:0] != 3'd1;
 end
 
@@ -126,10 +139,24 @@ icache #(.WAYS(CACHE_WAYS)) u_icache(
     .perf_hit(perf_events[1]), .perf_miss(perf_events[2])
 );
 
+store_buffer #(.ENABLE(STORE_BUFFER)) u_store_buffer(
+    .clk(aclk), .resetn(aresetn),
+    .cpu_req(data_req), .cpu_we(data_we),
+    .cpu_addr(data_addr), .cpu_wdata(data_wdata),
+    .cpu_addr_ok(data_addr_ok), .cpu_data_ok(data_data_ok),
+    .cpu_rdata(data_rdata),
+    .dc_req(dc_cpu_req), .dc_we(dc_cpu_we),
+    .dc_addr(dc_cpu_addr), .dc_wdata(dc_cpu_wdata),
+    .dc_addr_ok(dc_cpu_addr_ok), .dc_data_ok(dc_cpu_data_ok),
+    .dc_rdata(dc_cpu_rdata), .empty(stores_drained)
+);
+
 dcache #(.WAYS(CACHE_WAYS)) u_dcache(
     .clk(aclk), .resetn(aresetn),
-    .req(data_req), .we(data_we), .addr(data_addr), .wdata(data_wdata),
-    .addr_ok(data_addr_ok), .data_ok(data_data_ok), .rdata(data_rdata),
+    .req(dc_cpu_req), .we(dc_cpu_we),
+    .addr(dc_cpu_addr), .wdata(dc_cpu_wdata),
+    .addr_ok(dc_cpu_addr_ok), .data_ok(dc_cpu_data_ok),
+    .rdata(dc_cpu_rdata),
     .rd_req(dc_rd_req), .rd_addr(dc_rd_addr), .rd_len(dc_rd_len),
     .rd_ready(dc_rd_ready),
     .ret_valid(rvalid && rready && rid == 4'd1),

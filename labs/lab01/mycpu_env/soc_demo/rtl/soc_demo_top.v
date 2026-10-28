@@ -2,7 +2,8 @@
 module soc_demo_top #(
     parameter ROM_FILE = "labs/lab01/mycpu_env/examples/peripherals/peripheral_demo.hex",
     parameter ROM_WORDS = 11,
-    parameter integer UART_CLKS_PER_BIT = 217
+    parameter integer UART_CLKS_PER_BIT = 217,
+    parameter STORE_BUFFER = 1
 )(
     input  wire        clk,
     input  wire        resetn,
@@ -38,7 +39,7 @@ wire bvalid;
 wire bready;
 wire [6:0] perf_events;
 
-mycpu_top u_cpu(
+mycpu_top #(.STORE_BUFFER(STORE_BUFFER)) u_cpu(
     .aclk(clk), .aresetn(resetn),
     .arid(arid), .araddr(araddr), .arlen(arlen),
     .arsize(), .arburst(), .arlock(), .arcache(), .arprot(),
