@@ -39,4 +39,6 @@ vvp /tmp/dcache_pipeline_tb
 
 AXI 顶层默认使用四项取指缓冲队列；`mycpu_top.FETCH_QUEUE_DEPTH=1` 使用原单条缓冲路径。AXI 测试在四项配置中检查队列确实装入多条指令；同一程序到达完成标记分别需要 289 拍（单条）和 272 拍（四项）。`fetch_queue_tb.v` 另外检查分支纠正清空旧队列，以及异常跳转后丢弃迟到的旧取指响应。
 
+I-Cache 默认尝试在不抢占正式缺失请求时预取下一条顺序 Cache 行；`mycpu_top.ICACHE_PREFETCH=0` 关闭。预取可与当前行命中并行；跳转后无用的预取只更新 Cache，不会作为指令送入流水线。`prefetch_perf_tb.v` 使用 180 条连续算术指令，在同一 SoC 模型中对比关闭/开启配置，完成时间分别为 653 和 383 拍。
+
 `cacop` 按参考手册实现 code[4:3] 为 0（Store Tag）、1（索引无效/写回）、2（命中无效/写回），对象 code[2:0] 为 0（I-Cache）或 1（D-Cache）。当前 CPU 没有地址翻译/TLB，课程 n73–n78 中涉及 DMW/TLB 的部分不能作为本阶段的完整验收。

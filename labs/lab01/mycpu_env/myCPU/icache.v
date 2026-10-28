@@ -1,5 +1,5 @@
-// 64 行、每行 16 字节的直接映射指令 Cache。
-module icache #(parameter WAYS = 2)(
+// 每路 64 行、每行 16 字节的指令 Cache；可选顺序预取下一行。
+module icache #(parameter WAYS = 2, parameter PREFETCH = 0)(
     input  wire        clk,
     input  wire        resetn,
     input  wire        req,
@@ -28,8 +28,17 @@ localparam REFILL = 3'd3;
 localparam RESP = 3'd4;
 localparam MAINT = 3'd5;
 localparam MAINT_RESP = 3'd6;
+localparam WAIT_PREF = 3'd7;
+localparam PF_IDLE = 2'd0;
+localparam PF_ADDR = 2'd1;
+localparam PF_FILL = 2'd2;
 
 reg [2:0] state;
+reg [1:0] pf_state;
+reg [31:0] pf_addr;
+reg pf_way;
+reg [1:0] pf_beat;
+reg [127:0] pf_line;
 reg [31:0] saved_addr;
 reg [31:0] saved_data;
 reg [1:0] saved_maint_code;
@@ -58,24 +67,53 @@ wire victim_way = WAYS == 1 ? 1'b0 :
 wire [6:0] hit_entry = {hit_way, index};
 wire [6:0] selected_entry = {selected_way, index};
 wire [6:0] indexed_entry = {WAYS == 2 && saved_addr[0], index};
-
+wire [31:0] next_line = {saved_addr[31:4], 4'b0} + 32'd16;
+wire [5:0] next_index = next_line[9:4];
+wire [21:0] next_tag = next_line[31:10];
+wire [6:0] next_way0 = {1'b0, next_index};
+wire [6:0] next_way1 = {1'b1, next_index};
+wire next_hit = (line_valid[next_way0] &&
+                 line_tag[next_way0] == next_tag) ||
+                (WAYS == 2 && line_valid[next_way1] &&
+                 line_tag[next_way1] == next_tag);
+wire next_victim = WAYS == 1 ? 1'b0 :
+                   !line_valid[next_way0] ? 1'b0 :
+                   !line_valid[next_way1] ? 1'b1 :
+                   replacement_way[next_index];
+wire pf_candidate = PREFETCH && pf_state == PF_IDLE && !next_hit &&
+                    saved_addr[31:16] != 16'hbfaf &&
+                    next_line[31:16] == saved_addr[31:16];
+wire [6:0] pf_entry = {pf_way, pf_addr[9:4]};
 wire hit_response = state == LOOKUP && hit;
+wire accept_slot = state == IDLE || hit_response || state == RESP;
+wire incoming_hit = (line_valid[{1'b0, addr[9:4]}] &&
+                     line_tag[{1'b0, addr[9:4]}] == addr[31:10]) ||
+                    (WAYS == 2 && line_valid[{1'b1, addr[9:4]}] &&
+                     line_tag[{1'b1, addr[9:4]}] == addr[31:10]);
+wire pf_request = pf_state == PF_ADDR &&
+                  !(state == LOOKUP && !hit) &&
+                  !(req && accept_slot && !incoming_hit);
+
 // 每次普通查找只统计一次；维护操作和整行填充不算 CPU 取指。
 assign perf_hit = state == LOOKUP && hit;
 assign perf_miss = state == LOOKUP && !hit;
-wire accept_slot = state == IDLE || hit_response || state == RESP;
 assign addr_ok = accept_slot && !maint_req;
 assign data_ok = hit_response || state == RESP;
-assign maint_ready = accept_slot;
+assign maint_ready = accept_slot && pf_state == PF_IDLE;
 assign maint_done = state == MAINT_RESP;
 assign rdata = hit_response ? line_data[hit_entry][word_index*32 +: 32] :
                saved_data;
-assign rd_req = state == READ_ADDR;
-assign rd_addr = {saved_addr[31:4], 4'b0};
+assign rd_req = state == READ_ADDR || pf_request;
+assign rd_addr = state == READ_ADDR ? {saved_addr[31:4], 4'b0} : pf_addr;
 
 always @(posedge clk) begin
     if (!resetn) begin
         state <= IDLE;
+        pf_state <= PF_IDLE;
+        pf_addr <= 0;
+        pf_way <= 0;
+        pf_beat <= 0;
+        pf_line <= 0;
         line_valid <= 128'b0;
         replacement_way <= 64'b0;
         selected_way <= 1'b0;
@@ -87,8 +125,24 @@ always @(posedge clk) begin
         for (i = 0; i < 128; i = i + 1)
             line_tag[i] <= 22'b0;
     end else begin
+        if (pf_state == PF_ADDR && pf_request && rd_ready) begin
+            pf_state <= PF_FILL;
+            pf_beat <= 0;
+        end
+        if (pf_state == PF_FILL && ret_valid) begin
+            pf_line[pf_beat*32 +: 32] <= ret_data;
+            if (ret_last) begin
+                line_data[pf_entry] <= {ret_data, pf_line[95:0]};
+                line_tag[pf_entry] <= pf_addr[31:10];
+                line_valid[pf_entry] <= 1'b1;
+                replacement_way[pf_addr[9:4]] <= !pf_way;
+                pf_state <= PF_IDLE;
+            end else begin
+                pf_beat <= pf_beat + 1'b1;
+            end
+        end
         case (state)
-            IDLE: if (maint_req) begin
+            IDLE: if (maint_req && pf_state == PF_IDLE) begin
                 saved_addr <= maint_addr;
                 saved_maint_code <= maint_code;
                 state <= MAINT;
@@ -99,8 +153,13 @@ always @(posedge clk) begin
             LOOKUP: begin
                 if (hit) begin
                     replacement_way[index] <= !hit_way;
+                    if (word_index == 0 && pf_candidate && !maint_req) begin
+                        pf_addr <= next_line;
+                        pf_way <= next_victim;
+                        pf_state <= PF_ADDR;
+                    end
                     // 本条命中响应的同时，下一条请求可以进入查找级。
-                    if (maint_req) begin
+                    if (maint_req && pf_state == PF_IDLE) begin
                         saved_addr <= maint_addr;
                         saved_maint_code <= maint_code;
                         state <= MAINT;
@@ -112,7 +171,13 @@ always @(posedge clk) begin
                     end
                 end else begin
                     selected_way <= victim_way;
-                    state <= READ_ADDR;
+                    if (pf_state == PF_FILL)
+                        state <= WAIT_PREF;
+                    else begin
+                        state <= READ_ADDR;
+                        if (pf_state == PF_ADDR)
+                            pf_state <= PF_IDLE;
+                    end
                 end
             end
             READ_ADDR: if (rd_ready) begin
@@ -129,13 +194,18 @@ always @(posedge clk) begin
                     line_tag[selected_entry] <= tag;
                     line_valid[selected_entry] <= 1'b1;
                     replacement_way[index] <= !selected_way;
+                    if (pf_candidate) begin
+                        pf_addr <= next_line;
+                        pf_way <= next_victim;
+                        pf_state <= PF_ADDR;
+                    end
                     state <= RESP;
                 end else begin
                     beat <= beat + 1'b1;
                 end
             end
             RESP: begin
-                if (maint_req) begin
+                if (maint_req && pf_state == PF_IDLE) begin
                     saved_addr <= maint_addr;
                     saved_maint_code <= maint_code;
                     state <= MAINT;
@@ -144,6 +214,15 @@ always @(posedge clk) begin
                     state <= LOOKUP;
                 end else begin
                     state <= IDLE;
+                end
+            end
+            WAIT_PREF: if (pf_state == PF_IDLE) begin
+                if (hit) begin
+                    saved_data <= line_data[hit_entry][word_index*32 +: 32];
+                    state <= RESP;
+                end else begin
+                    selected_way <= victim_way;
+                    state <= READ_ADDR;
                 end
             end
             MAINT: begin

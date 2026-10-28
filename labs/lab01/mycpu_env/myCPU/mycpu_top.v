@@ -2,7 +2,8 @@
 module mycpu_top #(
     parameter CACHE_WAYS = 2,
     parameter STORE_BUFFER = 1,
-    parameter FETCH_QUEUE_DEPTH = 4
+    parameter FETCH_QUEUE_DEPTH = 4,
+    parameter ICACHE_PREFETCH = 1
 )(
     input  wire        aclk,
     input  wire        aresetn,
@@ -126,7 +127,7 @@ mycpu_core #(.FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH)) u_core(
     .perf_branch_miss(perf_events[6])
 );
 
-icache #(.WAYS(CACHE_WAYS)) u_icache(
+icache #(.WAYS(CACHE_WAYS), .PREFETCH(ICACHE_PREFETCH)) u_icache(
     .clk(aclk), .resetn(aresetn),
     .req(inst_req), .addr(inst_addr),
     .addr_ok(inst_addr_ok), .data_ok(inst_data_ok), .rdata(inst_rdata),
