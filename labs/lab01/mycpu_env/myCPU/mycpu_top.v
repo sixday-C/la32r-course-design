@@ -41,7 +41,9 @@ module mycpu_top #(parameter CACHE_WAYS = 2)(
     output wire [31:0] debug_wb_pc,
     output wire [3:0]  debug_wb_rf_we,
     output wire [4:0]  debug_wb_rf_wnum,
-    output wire [31:0] debug_wb_rf_wdata
+    output wire [31:0] debug_wb_rf_wdata,
+    // SoC 可用这些脉冲统计性能；课程 AXI 引脚不受影响。
+    output wire [6:0]  perf_events
 );
 wire inst_req;
 wire [31:0] inst_addr;
@@ -104,7 +106,10 @@ mycpu_core u_core(
     .cache_cmd_ready(cache_cmd_ready), .cache_cmd_done(cache_cmd_done),
     .debug_wb_pc(debug_wb_pc), .debug_wb_rf_we(debug_wb_rf_we),
     .debug_wb_rf_wnum(debug_wb_rf_wnum),
-    .debug_wb_rf_wdata(debug_wb_rf_wdata)
+    .debug_wb_rf_wdata(debug_wb_rf_wdata),
+    .perf_retire(perf_events[0]),
+    .perf_branch(perf_events[5]),
+    .perf_branch_miss(perf_events[6])
 );
 
 icache #(.WAYS(CACHE_WAYS)) u_icache(
@@ -117,7 +122,8 @@ icache #(.WAYS(CACHE_WAYS)) u_icache(
     .ret_last(rlast), .ret_data(rdata),
     .maint_req(ic_maint_req), .maint_addr(cache_cmd_addr),
     .maint_code(cache_cmd_code[4:3]),
-    .maint_ready(ic_maint_ready), .maint_done(ic_maint_done)
+    .maint_ready(ic_maint_ready), .maint_done(ic_maint_done),
+    .perf_hit(perf_events[1]), .perf_miss(perf_events[2])
 );
 
 dcache #(.WAYS(CACHE_WAYS)) u_dcache(
@@ -133,7 +139,8 @@ dcache #(.WAYS(CACHE_WAYS)) u_dcache(
     .wr_ready(dc_wr_ready), .wr_done(dc_wr_done),
     .maint_req(dc_maint_req), .maint_addr(cache_cmd_addr),
     .maint_code(cache_cmd_code[4:3]),
-    .maint_ready(dc_maint_ready), .maint_done(dc_maint_done)
+    .maint_ready(dc_maint_ready), .maint_done(dc_maint_done),
+    .perf_hit(perf_events[3]), .perf_miss(perf_events[4])
 );
 
 // 数据读优先；I-Cache 缺失时请求一整行（4 个 32 位 beat）。

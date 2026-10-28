@@ -11,6 +11,8 @@ module ID_stage(
     output wire                        ds_to_es_valid,
     output wire [`DS_TO_ES_BUS_WD-1:0] ds_to_es_bus,
     output wire [`BR_BUS_WD-1:0]       br_bus,
+    output wire                        perf_branch,
+    output wire                        perf_branch_miss,
     input  wire [`ES_FWD_BUS_WD-1:0]   es_fwd_bus,
     input  wire [`MS_FWD_BUS_WD-1:0]   ms_fwd_bus,
     input  wire [`WS_FWD_BUS_WD-1:0]   ws_fwd_bus,
@@ -461,6 +463,11 @@ wire [31:0] br_target =
 
 wire [31:0] actual_next = br_taken ? br_target : ds_pc + 32'd4;
 assign br_redirect = branch_resolved && ds_pred_next != actual_next;
+// 只统计真正的分支指令，普通指令即使经过 ID 也不算。
+assign perf_branch = branch_resolved &&
+    (inst_beq || inst_bne || inst_blt || inst_bge ||
+     inst_bltu || inst_bgeu || inst_bl || inst_b || inst_jirl);
+assign perf_branch_miss = perf_branch && br_redirect;
 assign br_bus = {branch_resolved, br_taken,
                  br_redirect, ds_pc, actual_next};
 // ds_to_es_bus：传给 EXE 阶段的总线

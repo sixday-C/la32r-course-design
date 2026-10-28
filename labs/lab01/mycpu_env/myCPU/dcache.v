@@ -27,7 +27,9 @@ module dcache #(parameter WAYS = 2)(
     input  wire [31:0]  maint_addr,
     input  wire [1:0]   maint_code,
     output wire         maint_ready,
-    output wire         maint_done
+    output wire         maint_done,
+    output wire         perf_hit,
+    output wire         perf_miss
 );
 localparam IDLE       = 4'd0;
 localparam LOOKUP     = 4'd1;
@@ -96,6 +98,9 @@ function [127:0] merge_store;
 endfunction
 
 wire hit_response = state == LOOKUP && !maintenance && !bypass && hit;
+// 外设绕过 Cache，不能算作命中或缺失。
+assign perf_hit = state == LOOKUP && !maintenance && !bypass && hit;
+assign perf_miss = state == LOOKUP && !maintenance && !bypass && !hit;
 wire accept_slot = state == IDLE || hit_response || state == RESP;
 assign addr_ok = accept_slot && !maint_req;
 assign data_ok = hit_response || (state == RESP && !maintenance);

@@ -26,8 +26,8 @@ wire cpu_resetn = !reset_btn && (&startup_reset_count);
 wire [15:0] local_led;
 wire [31:0] local_num;
 soc_demo_top #(
-    .ROM_FILE("labs/lab01/mycpu_env/examples/peripherals/uart_echo.hex"),
-    .ROM_WORDS(18)
+    .ROM_FILE("labs/lab01/mycpu_env/examples/peripherals/perf_demo.hex"),
+    .ROM_WORDS(78)
 ) u_soc(
     .clk(clk_25M),
     .resetn(cpu_resetn),

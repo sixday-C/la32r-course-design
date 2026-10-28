@@ -25,7 +25,8 @@ module WB_stage(
     output wire [31:0]                 debug_wb_pc,
     output wire [3:0]                  debug_wb_rf_we,
     output wire [4:0]                  debug_wb_rf_wnum,
-    output wire [31:0]                 debug_wb_rf_wdata
+    output wire [31:0]                 debug_wb_rf_wdata,
+    output wire                        perf_retire
 );
 
 reg ws_valid;
@@ -119,5 +120,7 @@ assign debug_wb_pc = ws_pc;
 assign debug_wb_rf_we = {4{rf_we}};
 assign debug_wb_rf_wnum = ws_dest;
 assign debug_wb_rf_wdata = final_result;
+// 包括 store、分支等没有通用寄存器写回的正常指令。
+assign perf_retire = ws_valid && !wb_ex;
 
 endmodule

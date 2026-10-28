@@ -68,12 +68,12 @@ def check_rom_init() -> None:
     init = rom["parameters"]["INIT"]
     width = int(rom["parameters"]["WIDTH"], 2)
     expected = [int(line, 16) for line in
-                (REPO / "labs/lab01/mycpu_env/examples/peripherals/uart_echo.hex")
+                (REPO / "labs/lab01/mycpu_env/examples/peripherals/perf_demo.hex")
                 .read_text().splitlines() if line.strip()]
     actual = [int(init[-(index + 1) * width:][:width], 2)
               for index in range(len(expected))]
     if width != 32 or actual != expected:
-        raise RuntimeError("综合后的指令 ROM 与 uart_echo.hex 不一致")
+        raise RuntimeError("综合后的指令 ROM 与 perf_demo.hex 不一致")
 
 
 if "--check-rom" in sys.argv:
@@ -93,7 +93,7 @@ if "--resume-frames" not in sys.argv:
                         "--report", str(BUILD / "timing.json")])
 database = TOOLS / "openxc7/share/nextpnr/external/prjxray-db/artix7"
 part = "xc7a200tfbg676-1"
-bitstream = OUT / "uart_echo_25MHz.bit"
+bitstream = OUT / "perf_demo_25MHz.bit"
 with tempfile.TemporaryDirectory(prefix="mycpu-openxc7-") as temporary:
     ascii_path = Path(temporary)
     (ascii_path / "remote.fasm").symlink_to(BUILD / "remote.fasm")
@@ -107,6 +107,6 @@ with tempfile.TemporaryDirectory(prefix="mycpu-openxc7-") as temporary:
                       "--part_file", str(ascii_path / "database" / part / "part.yaml"),
                       "--part_name", part,
                       "--frm_file", str(ascii_path / "remote.frames"),
-                      "--output_file", str(ascii_path / "peripheral_demo.bit")])
-    shutil.copy2(ascii_path / "peripheral_demo.bit", bitstream)
+                      "--output_file", str(ascii_path / "perf_demo.bit")])
+    shutil.copy2(ascii_path / "perf_demo.bit", bitstream)
 print(bitstream)

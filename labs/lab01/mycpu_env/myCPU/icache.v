@@ -17,7 +17,9 @@ module icache #(parameter WAYS = 2)(
     input  wire [31:0] maint_addr,
     input  wire [1:0]  maint_code,
     output wire        maint_ready,
-    output wire        maint_done
+    output wire        maint_done,
+    output wire        perf_hit,
+    output wire        perf_miss
 );
 localparam IDLE = 3'd0;
 localparam LOOKUP = 3'd1;
@@ -58,6 +60,9 @@ wire [6:0] selected_entry = {selected_way, index};
 wire [6:0] indexed_entry = {WAYS == 2 && saved_addr[0], index};
 
 wire hit_response = state == LOOKUP && hit;
+// 每次普通查找只统计一次；维护操作和整行填充不算 CPU 取指。
+assign perf_hit = state == LOOKUP && hit;
+assign perf_miss = state == LOOKUP && !hit;
 wire accept_slot = state == IDLE || hit_response || state == RESP;
 assign addr_ok = accept_slot && !maint_req;
 assign data_ok = hit_response || state == RESP;

@@ -28,7 +28,10 @@ module mycpu_core(
     output wire [31:0] debug_wb_pc,
     output wire [3:0]  debug_wb_rf_we,
     output wire [4:0]  debug_wb_rf_wnum,
-    output wire [31:0] debug_wb_rf_wdata
+    output wire [31:0] debug_wb_rf_wdata,
+    output wire        perf_retire,
+    output wire        perf_branch,
+    output wire        perf_branch_miss
 );
 
 reg reset;
@@ -104,6 +107,8 @@ ID_stage u_id (
     .ds_to_es_valid  (ds_to_es_valid),
     .ds_to_es_bus    (ds_to_es_bus),
     .br_bus          (br_bus),
+    .perf_branch     (perf_branch),
+    .perf_branch_miss(perf_branch_miss),
     .es_fwd_bus      (es_fwd_bus),
     .ms_fwd_bus      (ms_fwd_bus),
     .ws_fwd_bus      (ws_fwd_bus),
@@ -174,7 +179,8 @@ WB_stage u_wb (
     .debug_wb_pc       (debug_wb_pc),
     .debug_wb_rf_we    (debug_wb_rf_we),
     .debug_wb_rf_wnum  (debug_wb_rf_wnum),
-    .debug_wb_rf_wdata (debug_wb_rf_wdata)
+    .debug_wb_rf_wdata (debug_wb_rf_wdata),
+    .perf_retire       (perf_retire)
 );
 
 csr_file u_csr (

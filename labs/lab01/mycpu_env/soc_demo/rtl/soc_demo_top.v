@@ -36,6 +36,7 @@ wire wready;
 wire [3:0] bid;
 wire bvalid;
 wire bready;
+wire [6:0] perf_events;
 
 mycpu_top u_cpu(
     .aclk(clk), .aresetn(resetn),
@@ -51,7 +52,8 @@ mycpu_top u_cpu(
     .wvalid(wvalid), .wready(wready),
     .bid(bid), .bresp(2'b0), .bvalid(bvalid), .bready(bready),
     .debug_wb_pc(), .debug_wb_rf_we(),
-    .debug_wb_rf_wnum(), .debug_wb_rf_wdata()
+    .debug_wb_rf_wnum(), .debug_wb_rf_wdata(),
+    .perf_events(perf_events)
 );
 
 reg [31:0] inst_rom [0:255];
@@ -90,6 +92,14 @@ wire uart_read_fire = rvalid && rready && read_id != 0 &&
 wire uart_write_fire = wvalid && wready &&
                        current_write_addr[31:16] == 16'hbfaf &&
                        current_write_addr[15:0] == 16'hff10;
+wire perf_control_write = wvalid && wready && wstrb[0] &&
+                          current_write_addr == 32'hbfaffe00;
+wire [31:0] perf_rdata;
+perf_monitor u_perf(
+    .clk(clk), .resetn(resetn), .events(perf_events),
+    .control_write(perf_control_write), .control_wdata(wdata),
+    .read_index(current_read_addr[5:2]), .read_data(perf_rdata)
+);
 uart_mmio #(.CLKS_PER_BIT(UART_CLKS_PER_BIT)) u_uart(
     .clk(clk), .resetn(resetn), .rx(uart_rxd), .tx(uart_txd),
     .tx_write(uart_write_fire), .tx_data(wdata[7:0]), .tx_ready(uart_tx_ready),
@@ -100,6 +110,7 @@ assign rdata = read_id == 0 ?
                current_read_addr[9:2] < ROM_WORDS ?
                inst_rom[current_read_addr[9:2]] : 32'b0 :
                current_read_addr[31:16] == 16'hbfaf ?
+               current_read_addr[15:6] == 10'h3f8 ? perf_rdata :
                current_read_addr[15:0] == 16'hf020 ? {16'b0, led} :
                current_read_addr[15:0] == 16'hf050 ? num_data :
                current_read_addr[15:0] == 16'hf060 ? {24'b0, switch} :
