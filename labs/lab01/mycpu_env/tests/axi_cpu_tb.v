@@ -2,7 +2,9 @@
 module axi_cpu_tb #(
     parameter WAYS = 1,
     parameter STORE_BUFFER = 1,
-    parameter FETCH_QUEUE_DEPTH = 4
+    parameter FETCH_QUEUE_DEPTH = 4,
+    parameter ICACHE_PREFETCH = 1,
+    parameter PREDICTOR_MODE = 1
 );
 reg clk = 0;
 always #5 clk = ~clk;
@@ -43,7 +45,9 @@ wire [31:0] debug_wb_rf_wdata;
 mycpu_top #(
     .CACHE_WAYS(WAYS),
     .STORE_BUFFER(STORE_BUFFER),
-    .FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH)
+    .FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH),
+    .ICACHE_PREFETCH(ICACHE_PREFETCH),
+    .PREDICTOR_MODE(PREDICTOR_MODE)
 ) cpu(
     .aclk(clk), .aresetn(resetn),
     .arid(arid), .araddr(araddr), .arlen(arlen),
@@ -296,13 +300,14 @@ always @(posedge clk) begin
         end
         if (debug_wb_rf_wnum == 17) begin
             if (debug_wb_rf_wdata !== 9 ||
-                branch_redirects != 2 || predicted_branches < 1)
+                branch_redirects != 2 ||
+                (PREDICTOR_MODE == 0 && predicted_branches < 1))
                 $fatal(1, "branch prediction mismatch: redirects=%0d predicted=%0d",
                        branch_redirects, predicted_branches);
             if (FETCH_QUEUE_DEPTH > 1 && max_fetch_queue < 2)
                 $fatal(1, "fetch queue never held multiple instructions");
-            $display("AXI CPU, CACHE AND PREDICTOR PASS (ways=%0d, store_buffer=%0d, queue=%0d, peak=%0d, cycles=%0d)",
-                     WAYS, STORE_BUFFER, FETCH_QUEUE_DEPTH,
+            $display("AXI CPU, CACHE AND PREDICTOR PASS (ways=%0d, store_buffer=%0d, queue=%0d, predictor=%0d, peak=%0d, cycles=%0d)",
+                     WAYS, STORE_BUFFER, FETCH_QUEUE_DEPTH, PREDICTOR_MODE,
                      max_fetch_queue, cycle);
             $finish;
         end

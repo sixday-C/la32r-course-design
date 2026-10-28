@@ -5,7 +5,8 @@ module soc_demo_top #(
     parameter integer UART_CLKS_PER_BIT = 217,
     parameter STORE_BUFFER = 1,
     parameter FETCH_QUEUE_DEPTH = 4,
-    parameter ICACHE_PREFETCH = 1
+    parameter ICACHE_PREFETCH = 1,
+    parameter PREDICTOR_MODE = 1
 )(
     input  wire        clk,
     input  wire        resetn,
@@ -44,7 +45,8 @@ wire [6:0] perf_events;
 mycpu_top #(
     .STORE_BUFFER(STORE_BUFFER),
     .FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH),
-    .ICACHE_PREFETCH(ICACHE_PREFETCH)
+    .ICACHE_PREFETCH(ICACHE_PREFETCH),
+    .PREDICTOR_MODE(PREDICTOR_MODE)
 ) u_cpu(
     .aclk(clk), .aresetn(resetn),
     .arid(arid), .araddr(araddr), .arlen(arlen),

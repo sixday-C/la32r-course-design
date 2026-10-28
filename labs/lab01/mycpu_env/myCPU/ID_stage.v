@@ -26,6 +26,7 @@ reg [31:0] ds_pc;
 reg [31:0] ds_inst;
 reg ds_adef;
 reg [31:0] ds_pred_next;
+reg [5:0] ds_pred_index;
 wire ds_ready_go;
 wire br_taken;
 wire br_redirect;
@@ -45,7 +46,8 @@ always @(posedge clk) begin
     end
 //当 IF 能传给 ID 阶段时，且 ID 阶段能接受的时候，ID 阶段就接收 IF→ID bus 的指令和 PC
     if (fs_to_ds_valid && ds_allowin) begin
-        {ds_adef, ds_inst, ds_pc, ds_pred_next} <= fs_to_ds_bus;
+        {ds_adef, ds_inst, ds_pc, ds_pred_next,
+         ds_pred_index} <= fs_to_ds_bus;
     end
 end
 
@@ -468,8 +470,8 @@ assign perf_branch = branch_resolved &&
     (inst_beq || inst_bne || inst_blt || inst_bge ||
      inst_bltu || inst_bgeu || inst_bl || inst_b || inst_jirl);
 assign perf_branch_miss = perf_branch && br_redirect;
-assign br_bus = {branch_resolved, br_taken,
-                 br_redirect, ds_pc, actual_next};
+assign br_bus = {perf_branch, br_taken, br_redirect,
+                 ds_pc, actual_next, ds_pred_index};
 // ds_to_es_bus：传给 EXE 阶段的总线
 // 其中包含了 ALU 操作码、源操作数、立即数、访存控制信号、目的寄存器号和当前 PC。
 assign ds_to_es_bus = {

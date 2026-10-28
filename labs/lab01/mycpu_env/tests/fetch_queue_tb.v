@@ -42,11 +42,12 @@ initial begin
     request_and_reply(32'h1c000000, 32'h11111111);
     request_and_reply(32'h1c000004, 32'h22222222);
     #1;
-    if (dut.queued.count != 2 || fs_to_ds_bus[95:64] !== 32'h11111111)
+    if (dut.queued.count != 2 || fs_to_ds_bus[101:70] !== 32'h11111111)
         $fatal(1, "queue did not retain two instructions");
 
     // ID 发现分支预测错误：队列中旧路径的指令都要丢掉。
-    br_bus = {1'b1, 1'b1, 1'b1, 32'h1c000000, 32'h1c000040};
+    br_bus = {1'b1, 1'b1, 1'b1,
+              32'h1c000000, 32'h1c000040, 6'b0};
     @(negedge clk);
     br_bus = 0;
     if (fs_to_ds_valid) $fatal(1, "branch redirect kept wrong-path queue");
@@ -67,8 +68,8 @@ initial begin
 
     request_and_reply(32'h1c000080, 32'h33333333);
     #1;
-    if (!fs_to_ds_valid || fs_to_ds_bus[63:32] !== 32'h1c000080 ||
-        fs_to_ds_bus[95:64] !== 32'h33333333)
+    if (!fs_to_ds_valid || fs_to_ds_bus[69:38] !== 32'h1c000080 ||
+        fs_to_ds_bus[101:70] !== 32'h33333333)
         $fatal(1, "exception target instruction/PC mismatch");
     $display("FETCH QUEUE REDIRECT PASS");
     $finish;

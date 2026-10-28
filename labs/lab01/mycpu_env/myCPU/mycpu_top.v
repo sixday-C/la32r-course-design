@@ -3,7 +3,8 @@ module mycpu_top #(
     parameter CACHE_WAYS = 2,
     parameter STORE_BUFFER = 1,
     parameter FETCH_QUEUE_DEPTH = 4,
-    parameter ICACHE_PREFETCH = 1
+    parameter ICACHE_PREFETCH = 1,
+    parameter PREDICTOR_MODE = 1
 )(
     input  wire        aclk,
     input  wire        aresetn,
@@ -107,7 +108,10 @@ always @(posedge aclk) begin
          cache_cmd_code[2:0] != 3'd0 && cache_cmd_code[2:0] != 3'd1;
 end
 
-mycpu_core #(.FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH)) u_core(
+mycpu_core #(
+    .FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH),
+    .PREDICTOR_MODE(PREDICTOR_MODE)
+) u_core(
     .clk(aclk), .resetn(aresetn), .hw_int_in(8'b0),
     .inst_req(inst_req), .inst_addr(inst_addr),
     .inst_addr_ok(inst_addr_ok), .inst_data_ok(inst_data_ok),
