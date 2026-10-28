@@ -1,5 +1,5 @@
 `include "mycpu_head.v"
-module IF_stage(
+module IF_stage #(parameter FETCH_QUEUE_DEPTH = 1)(
     input  wire                        clk,
     input  wire                        reset,
     input  wire                        flush,
@@ -14,6 +14,8 @@ module IF_stage(
     input  wire                        inst_data_ok,
     input  wire [31:0]                 inst_rdata
 );
+wire predict_hit;
+generate if (FETCH_QUEUE_DEPTH == 1) begin: legacy
 
 wire br_update;
 wire br_taken;
@@ -40,7 +42,7 @@ reg [31:0] btb_target [0:63];
 reg [1:0] bht [0:63];
 integer i;
 wire [5:0] predict_index = next_pc[7:2];
-wire predict_hit = btb_valid[predict_index] &&
+assign predict_hit = btb_valid[predict_index] &&
                    btb_tag[predict_index] == next_pc[31:8] &&
                    bht[predict_index][1];
 wire [31:0] predicted_next = predict_hit ? btb_target[predict_index] :
@@ -124,4 +126,120 @@ always @(posedge clk) begin
         end
     end
 end
+end else begin: queued
+wire br_update;
+wire br_taken;
+wire br_redirect;
+wire [31:0] br_pc;
+wire [31:0] br_next_pc;
+assign {br_update, br_taken, br_redirect, br_pc, br_next_pc} = br_bus;
+
+reg [31:0] next_pc;
+reg [31:0] pending_pc;
+reg [31:0] pending_pred_next;
+reg pending;
+reg discard_pending;
+reg [2:0] count;
+reg [1:0] head;
+reg [1:0] tail;
+reg [31:0] q_pc [0:3];
+reg [31:0] q_inst [0:3];
+reg [31:0] q_pred_next [0:3];
+reg q_adef [0:3];
+
+reg [63:0] btb_valid;
+reg [23:0] btb_tag [0:63];
+reg [31:0] btb_target [0:63];
+reg [1:0] bht [0:63];
+integer i;
+wire [5:0] predict_index = next_pc[7:2];
+assign predict_hit = btb_valid[predict_index] &&
+                   btb_tag[predict_index] == next_pc[31:8] &&
+                   bht[predict_index][1];
+wire [31:0] predicted_next = predict_hit ? btb_target[predict_index] :
+                             next_pc + 32'd4;
+wire [5:0] update_index = br_pc[7:2];
+wire update_hit = btb_valid[update_index] &&
+                  btb_tag[update_index] == br_pc[31:8];
+wire pop = count != 0 && ds_allowin;
+wire push_response = pending && inst_data_ok &&
+                     !discard_pending && !flush && !br_redirect;
+wire push_adef = !pending && count < FETCH_QUEUE_DEPTH &&
+                 |next_pc[1:0] && !flush && !br_redirect;
+wire push = push_response || push_adef;
+
+assign fs_to_ds_valid = count != 0;
+assign fs_to_ds_bus = {q_adef[head], q_inst[head],
+                       q_pc[head], q_pred_next[head]};
+assign inst_req = !reset && !flush && !br_redirect &&
+                  !pending && count < FETCH_QUEUE_DEPTH &&
+                  !(|next_pc[1:0]);
+assign inst_addr = next_pc;
+
+always @(posedge clk) begin
+    if (reset) begin
+        next_pc <= 32'h1c000000;
+        pending_pc <= 0;
+        pending_pred_next <= 0;
+        pending <= 0;
+        discard_pending <= 0;
+        count <= 0;
+        head <= 0;
+        tail <= 0;
+        btb_valid <= 0;
+        for (i = 0; i < 64; i = i + 1)
+            bht[i] <= 0;
+    end else begin
+        if (br_update) begin
+            if (br_taken) begin
+                btb_valid[update_index] <= 1'b1;
+                btb_tag[update_index] <= br_pc[31:8];
+                btb_target[update_index] <= br_next_pc;
+                bht[update_index] <= !update_hit ? 2'b10 :
+                    bht[update_index] == 2'b11 ? 2'b11 :
+                    bht[update_index] + 1'b1;
+            end else if (update_hit && bht[update_index] != 2'b00) begin
+                bht[update_index] <= bht[update_index] - 1'b1;
+            end
+        end
+
+        if (pending && inst_data_ok) begin
+            pending <= 0;
+            discard_pending <= 0;
+        end
+        if (inst_req && inst_addr_ok) begin
+            pending <= 1;
+            pending_pc <= next_pc;
+            pending_pred_next <= predicted_next;
+            next_pc <= predicted_next;
+        end
+        if (push_adef)
+            next_pc <= next_pc + 32'd4;
+
+        if (push) begin
+            q_adef[tail] <= push_adef;
+            q_inst[tail] <= push_adef ? 32'b0 : inst_rdata;
+            q_pc[tail] <= push_adef ? next_pc : pending_pc;
+            q_pred_next[tail] <= push_adef ? next_pc + 32'd4 :
+                                 pending_pred_next;
+            tail <= tail + 1'b1;
+        end
+        if (pop) head <= head + 1'b1;
+        case ({push, pop})
+            2'b10: count <= count + 1'b1;
+            2'b01: count <= count - 1'b1;
+            default: count <= count;
+        endcase
+
+        if (br_redirect || flush) begin
+            next_pc <= flush ? flush_pc : br_next_pc;
+            count <= 0;
+            head <= 0;
+            tail <= 0;
+            if (pending && !inst_data_ok)
+                discard_pending <= 1;
+        end
+    end
+end
+end endgenerate
 endmodule

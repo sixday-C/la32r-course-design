@@ -1,5 +1,5 @@
 `include "mycpu_head.v"
-module mycpu_core(
+module mycpu_core #(parameter FETCH_QUEUE_DEPTH = 1)(
     input  wire        clk,
     input  wire        resetn,
     input  wire [7:0]  hw_int_in,
@@ -78,7 +78,7 @@ wire [63:0] counter_value;
 wire [31:0] tid_value;
 
 // 五级流水级通过 bus 传递数据；顶层只负责连线。
-IF_stage u_if (
+IF_stage #(.FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH)) u_if (
     .clk             (clk),
     .reset           (reset),
     .flush           (wb_flush),

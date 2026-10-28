@@ -1,7 +1,8 @@
 // AXI 顶层。读 ID 0 给取指，读 ID 1 给访存；CPU 每个端口最多一笔未完成请求。
 module mycpu_top #(
     parameter CACHE_WAYS = 2,
-    parameter STORE_BUFFER = 1
+    parameter STORE_BUFFER = 1,
+    parameter FETCH_QUEUE_DEPTH = 4
 )(
     input  wire        aclk,
     input  wire        aresetn,
@@ -105,7 +106,7 @@ always @(posedge aclk) begin
          cache_cmd_code[2:0] != 3'd0 && cache_cmd_code[2:0] != 3'd1;
 end
 
-mycpu_core u_core(
+mycpu_core #(.FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH)) u_core(
     .clk(aclk), .resetn(aresetn), .hw_int_in(8'b0),
     .inst_req(inst_req), .inst_addr(inst_addr),
     .inst_addr_ok(inst_addr_ok), .inst_data_ok(inst_data_ok),

@@ -1,5 +1,9 @@
 `timescale 1ns/1ps
-module axi_cpu_tb #(parameter WAYS = 1, parameter STORE_BUFFER = 1);
+module axi_cpu_tb #(
+    parameter WAYS = 1,
+    parameter STORE_BUFFER = 1,
+    parameter FETCH_QUEUE_DEPTH = 4
+);
 reg clk = 0;
 always #5 clk = ~clk;
 reg resetn = 0;
@@ -36,7 +40,11 @@ wire [3:0] debug_wb_rf_we;
 wire [4:0] debug_wb_rf_wnum;
 wire [31:0] debug_wb_rf_wdata;
 
-mycpu_top #(.CACHE_WAYS(WAYS), .STORE_BUFFER(STORE_BUFFER)) cpu(
+mycpu_top #(
+    .CACHE_WAYS(WAYS),
+    .STORE_BUFFER(STORE_BUFFER),
+    .FETCH_QUEUE_DEPTH(FETCH_QUEUE_DEPTH)
+) cpu(
     .aclk(clk), .aresetn(resetn),
     .arid(arid), .araddr(araddr), .arlen(arlen),
     .arvalid(arvalid), .arready(arready),
@@ -214,6 +222,12 @@ reg seen_r5 = 0;
 reg seen_r7 = 0;
 integer branch_redirects = 0;
 integer predicted_branches = 0;
+integer max_fetch_queue = 0;
+generate if (FETCH_QUEUE_DEPTH > 1) begin: queue_monitor
+    always @(posedge clk)
+        if (cpu.u_core.u_if.queued.count > max_fetch_queue)
+            max_fetch_queue <= cpu.u_core.u_if.queued.count;
+end endgenerate
 always @(posedge clk) begin
     if (resetn && cpu.u_core.u_id.br_redirect &&
         cpu.u_core.u_id.ds_pc == 32'h1c000068)
@@ -285,8 +299,11 @@ always @(posedge clk) begin
                 branch_redirects != 2 || predicted_branches < 1)
                 $fatal(1, "branch prediction mismatch: redirects=%0d predicted=%0d",
                        branch_redirects, predicted_branches);
-            $display("AXI CPU, CACHE AND PREDICTOR PASS (ways=%0d, store_buffer=%0d, cycles=%0d)",
-                     WAYS, STORE_BUFFER, cycle);
+            if (FETCH_QUEUE_DEPTH > 1 && max_fetch_queue < 2)
+                $fatal(1, "fetch queue never held multiple instructions");
+            $display("AXI CPU, CACHE AND PREDICTOR PASS (ways=%0d, store_buffer=%0d, queue=%0d, peak=%0d, cycles=%0d)",
+                     WAYS, STORE_BUFFER, FETCH_QUEUE_DEPTH,
+                     max_fetch_queue, cycle);
             $finish;
         end
     end
