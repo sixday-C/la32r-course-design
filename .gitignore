@@ -8,3 +8,5 @@ labs/**/soc_demo/build/
 labs/**/soc_demo/out/
 labs/**/examples/peripherals/*.o
 labs/**/examples/peripherals/*.bin
+labs/**/func/obj/
+labs/**/gettrace/golden_trace.txt
